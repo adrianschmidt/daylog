@@ -462,10 +462,20 @@ pub fn start_watcher(
                 }
 
                 let conn = conn_opt.as_ref().unwrap();
+                let mut conn_failed = false;
                 for path in pending_files.drain() {
                     if path.exists() {
                         if let Err(e) = materialize_file(conn, &path, &current_config, &modules) {
+                            let err_str = e.to_string();
                             eprintln!("Warning: failed to parse {}: {e}", path.display());
+                            // Detect connection-level failures
+                            if err_str.contains("disk I/O error")
+                                || err_str.contains("database is locked")
+                                || err_str.contains("unable to open")
+                            {
+                                conn_failed = true;
+                                break;
+                            }
                             let _ = conn.execute(
                                 "INSERT OR REPLACE INTO sync_meta (key, value) VALUES ('last_error', ?1)",
                                 [format!("{}: {e}", path.display())],
@@ -476,6 +486,10 @@ pub fn start_watcher(
                             let _ = db::delete_date(conn, date);
                         }
                     }
+                }
+                if conn_failed {
+                    eprintln!("Watcher: database connection lost, will reconnect");
+                    conn_opt = None;
                 }
                 last_process = Instant::now();
             }

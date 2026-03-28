@@ -101,6 +101,10 @@ fn route_field(
             validate_core_field("energy", joined)?;
             return Ok(frontmatter::set_scalar(content, "energy", joined));
         }
+        "sleep_quality" => {
+            validate_core_field("sleep_quality", joined)?;
+            return Ok(frontmatter::set_scalar(content, "sleep_quality", joined));
+        }
         _ => {}
     }
 
@@ -111,6 +115,10 @@ fn route_field(
         }
         let subfield = &value[0];
         let remaining = value[1..].join(" ");
+        // Validate metric value is numeric
+        remaining.parse::<f64>().map_err(|_| {
+            color_eyre::eyre::eyre!("Invalid metric value: '{remaining}'. Expected a number")
+        })?;
         return Ok(frontmatter::set_scalar(content, subfield, &remaining));
     }
 
@@ -258,6 +266,48 @@ Good session.
             .unwrap_err()
             .to_string()
             .contains("Expected start-end"));
+    }
+
+    #[test]
+    fn test_sleep_quality_routes_correctly() {
+        let result = route_field(
+            "sleep_quality",
+            &["4".into()],
+            "4",
+            SAMPLE,
+            &empty_modules(),
+        )
+        .unwrap();
+        assert!(result.contains("sleep_quality: 4"));
+    }
+
+    #[test]
+    fn test_sleep_quality_validates() {
+        let result = route_field(
+            "sleep_quality",
+            &["9".into()],
+            "9",
+            SAMPLE,
+            &empty_modules(),
+        );
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_reject_metric_non_numeric() {
+        let value = vec!["resting_hr".into(), "banana".into()];
+        let result = route_field(
+            "metric",
+            &value,
+            "resting_hr banana",
+            SAMPLE,
+            &empty_modules(),
+        );
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Expected a number"));
     }
 
     #[test]
