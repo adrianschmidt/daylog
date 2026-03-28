@@ -4,8 +4,12 @@ version = "0.1.0"
 edition = "2021"
 description = "A terminal dashboard that tracks your life from markdown notes"
 license = "MIT"
+repository = "https://github.com/tylerjl/daylog"
+homepage = "https://github.com/tylerjl/daylog"
+readme = "README.md"
 keywords = ["tui", "dashboard", "life-tracking", "markdown", "terminal"]
 categories = ["command-line-utilities"]
+exclude = ["tapes/", ".claude/", ".github/"]
 
 [dependencies]
 ratatui = "0.29"

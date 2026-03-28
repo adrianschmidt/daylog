@@ -1,0 +1,217 @@
+use daylog::config::Config;
+use daylog::db;
+use daylog::modules;
+
+fn setup_test_env() -> (tempfile::TempDir, Config) {
+    let dir = tempfile::TempDir::new().unwrap();
+    let notes_dir = dir.path().to_path_buf();
+    let toml_str = format!(
+        r#"
+notes_dir = "{}"
+
+[modules]
+dashboard = true
+training = true
+trends = true
+climbing = false
+
+[exercises]
+squat = {{ display = "Squat", color = "cyan" }}
+pullup = {{ display = "Pullup", color = "blue" }}
+
+[metrics]
+resting_hr = {{ display = "Resting HR", color = "red", unit = "bpm" }}
+"#,
+        notes_dir.display()
+    );
+    let config: Config = toml::from_str(&toml_str).unwrap();
+    (dir, config)
+}
+
+fn setup_db(config: &Config, modules: &[Box<dyn modules::Module>]) -> rusqlite::Connection {
+    let db_path = config.db_path();
+    let conn = db::open_rw(&db_path).unwrap();
+    db::init_db(&conn, modules).unwrap();
+    modules::validate_module_tables(modules).unwrap();
+    conn
+}
+
+/// Full round-trip: write notes via log_cmd -> sync -> verify DB -> verify status JSON.
+#[test]
+fn test_full_roundtrip() {
+    let (dir, config) = setup_test_env();
+    let registry = modules::build_registry(&config);
+    let _conn = setup_db(&config, &registry);
+
+    // 1. Log several values
+    daylog::cli::log_cmd::execute("weight", &["173.4".into()], &config, &registry).unwrap();
+    daylog::cli::log_cmd::execute("mood", &["4".into()], &config, &registry).unwrap();
+    daylog::cli::log_cmd::execute("energy", &["3".into()], &config, &registry).unwrap();
+    daylog::cli::log_cmd::execute("sleep", &["10:30pm-6:15am".into()], &config, &registry).unwrap();
+    daylog::cli::log_cmd::execute(
+        "lift",
+        &["squat".into(), "185x5,".into(), "205x3".into()],
+        &config,
+        &registry,
+    )
+    .unwrap();
+    daylog::cli::log_cmd::execute(
+        "metric",
+        &["resting_hr".into(), "52".into()],
+        &config,
+        &registry,
+    )
+    .unwrap();
+
+    // 2. Verify the note file exists and has correct content
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let note_path = dir.path().join(format!("{today}.md"));
+    assert!(note_path.exists(), "Note file should exist");
+    let content = std::fs::read_to_string(&note_path).unwrap();
+    assert!(content.contains("weight: 173.4"));
+    assert!(content.contains("mood: 4"));
+    assert!(content.contains("energy: 3"));
+    assert!(content.contains("resting_hr: 52"));
+    assert!(content.contains("squat: 185x5, 205x3"));
+
+    // 3. Sync to database
+    let conn = db::open_rw(&config.db_path()).unwrap();
+    db::init_db(&conn, &registry).unwrap();
+    let (synced, errors) =
+        daylog::materializer::sync_all(&conn, &config.notes_dir_path(), &config, &registry)
+            .unwrap();
+    assert_eq!(synced, 1, "Should sync 1 file");
+    assert_eq!(errors, 0, "Should have 0 errors");
+
+    // 4. Verify DB data
+    let day = db::load_today(&conn, &today)
+        .unwrap()
+        .expect("Should have today's data");
+    assert_eq!(day["weight"], 173.4);
+    assert_eq!(day["mood"], 4);
+    assert_eq!(day["energy"], 3);
+    assert_eq!(day["sleep_start"], "10:30pm");
+    assert_eq!(day["sleep_end"], "6:15am");
+    assert!((day["sleep_hours"].as_f64().unwrap() - 7.75).abs() < 0.01);
+
+    // 5. Verify metrics
+    let metrics = db::load_metrics(&conn, &today).unwrap();
+    let rhr = metrics.iter().find(|(k, _)| k == "resting_hr");
+    assert!(rhr.is_some(), "Should have resting_hr metric");
+    assert_eq!(rhr.unwrap().1, 52.0);
+
+    // 6. Verify lift sets
+    let mut stmt = conn
+        .prepare("SELECT exercise, set_number, weight_lbs, reps FROM lift_sets WHERE date = ?1 ORDER BY set_number")
+        .unwrap();
+    let sets: Vec<(String, i32, f64, i32)> = stmt
+        .query_map([&today], |row| {
+            Ok((
+                row.get::<_, String>(0)?,
+                row.get::<_, i32>(1)?,
+                row.get::<_, f64>(2)?,
+                row.get::<_, i32>(3)?,
+            ))
+        })
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap();
+    assert_eq!(sets.len(), 2, "Should have 2 squat sets");
+    assert_eq!(sets[0], ("squat".into(), 1, 185.0, 5));
+    assert_eq!(sets[1], ("squat".into(), 2, 205.0, 3));
+}
+
+/// Test that demo data generation + sync produces a populated DB.
+#[test]
+fn test_demo_data_roundtrip() {
+    let (dir, config) = setup_test_env();
+    let registry = modules::build_registry(&config);
+
+    // Generate demo data
+    let count = daylog::demo::generate_demo_data(dir.path()).unwrap();
+    assert_eq!(count, 14);
+
+    // Sync all
+    let conn = db::open_rw(&config.db_path()).unwrap();
+    db::init_db(&conn, &registry).unwrap();
+    modules::validate_module_tables(&registry).unwrap();
+    let (synced, errors) =
+        daylog::materializer::rebuild_all(&conn, &config.notes_dir_path(), &config, &registry)
+            .unwrap();
+    assert_eq!(synced, 14);
+    assert_eq!(errors, 0);
+
+    // Verify we have days in the DB
+    let day_count: i32 = conn
+        .query_row("SELECT COUNT(*) FROM days", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(day_count, 14);
+
+    // Verify we have some lift sets
+    let lift_count: i32 = conn
+        .query_row("SELECT COUNT(*) FROM lift_sets", [], |row| row.get(0))
+        .unwrap();
+    assert!(lift_count > 0, "Should have some lift sets from demo data");
+
+    // Verify weight trend
+    let weight_trend = db::load_weight_trend(&conn, 42).unwrap();
+    assert!(!weight_trend.is_empty(), "Should have weight data");
+}
+
+/// Test that input validation rejects garbage.
+#[test]
+fn test_validation_rejects_garbage() {
+    let (_, config) = setup_test_env();
+    let registry = modules::build_registry(&config);
+
+    // Invalid weight
+    let result = daylog::cli::log_cmd::execute("weight", &["banana".into()], &config, &registry);
+    assert!(result.is_err());
+
+    // Mood out of range
+    let result = daylog::cli::log_cmd::execute("mood", &["999".into()], &config, &registry);
+    assert!(result.is_err());
+
+    // Energy zero
+    let result = daylog::cli::log_cmd::execute("energy", &["0".into()], &config, &registry);
+    assert!(result.is_err());
+
+    // Bad sleep format
+    let result = daylog::cli::log_cmd::execute("sleep", &["whenever".into()], &config, &registry);
+    assert!(result.is_err());
+
+    // Unknown field
+    let result = daylog::cli::log_cmd::execute("banana", &["123".into()], &config, &registry);
+    assert!(result.is_err());
+}
+
+/// Test that rebuild deletes and recreates cleanly.
+#[test]
+fn test_rebuild_is_idempotent() {
+    let (dir, config) = setup_test_env();
+    let registry = modules::build_registry(&config);
+
+    daylog::demo::generate_demo_data(dir.path()).unwrap();
+
+    let conn = db::open_rw(&config.db_path()).unwrap();
+    db::init_db(&conn, &registry).unwrap();
+    modules::validate_module_tables(&registry).unwrap();
+
+    // First build
+    let (s1, e1) =
+        daylog::materializer::rebuild_all(&conn, &config.notes_dir_path(), &config, &registry)
+            .unwrap();
+    assert_eq!(e1, 0);
+
+    // Second build (should produce identical results)
+    let (s2, e2) =
+        daylog::materializer::rebuild_all(&conn, &config.notes_dir_path(), &config, &registry)
+            .unwrap();
+    assert_eq!(s1, s2);
+    assert_eq!(e2, 0);
+
+    let count: i32 = conn
+        .query_row("SELECT COUNT(*) FROM days", [], |row| row.get(0))
+        .unwrap();
+    assert_eq!(count, 14, "Should still have exactly 14 days after rebuild");
+}

@@ -34,7 +34,7 @@ run:
 
 # Run with demo data (init first if needed)
 demo:
-    cargo run -- init --no-demo 2>/dev/null || true
+    cargo run -- init 2>/dev/null || true
     cargo run
 
 # Initialize with default settings

@@ -405,12 +405,12 @@ pub fn start_watcher(
 
         let mut current_config = config;
 
-        // Open DB connection once for the watcher's lifetime
-        let conn = match db::open_rw(&db_path) {
-            Ok(c) => c,
+        // Open DB connection once; reconnect on error
+        let mut conn_opt: Option<rusqlite::Connection> = match db::open_rw(&db_path) {
+            Ok(c) => Some(c),
             Err(e) => {
                 eprintln!("Watcher: failed to open database: {e}");
-                return;
+                None
             }
         };
 
@@ -446,22 +446,34 @@ pub fn start_watcher(
 
             // Process pending files after debounce
             if !pending_files.is_empty() && last_process.elapsed() >= debounce {
-                {
-                    for path in pending_files.drain() {
-                        if path.exists() {
-                            if let Err(e) =
-                                materialize_file(&conn, &path, &current_config, &modules)
-                            {
-                                eprintln!("Warning: failed to parse {}: {e}", path.display());
-                                let _ = conn.execute(
-                                    "INSERT OR REPLACE INTO sync_meta (key, value) VALUES ('last_error', ?1)",
-                                    [format!("{}: {e}", path.display())],
-                                );
-                            }
-                        } else if let Some(date) = path.file_stem().and_then(|s| s.to_str()) {
-                            if is_valid_date(date) {
-                                let _ = db::delete_date(&conn, date);
-                            }
+                // Reconnect if connection was lost
+                if conn_opt.is_none() {
+                    match db::open_rw(&db_path) {
+                        Ok(c) => {
+                            eprintln!("Watcher: reconnected to database");
+                            conn_opt = Some(c);
+                        }
+                        Err(e) => {
+                            eprintln!("Watcher: reconnect failed: {e}");
+                            last_process = Instant::now();
+                            continue;
+                        }
+                    }
+                }
+
+                let conn = conn_opt.as_ref().unwrap();
+                for path in pending_files.drain() {
+                    if path.exists() {
+                        if let Err(e) = materialize_file(conn, &path, &current_config, &modules) {
+                            eprintln!("Warning: failed to parse {}: {e}", path.display());
+                            let _ = conn.execute(
+                                "INSERT OR REPLACE INTO sync_meta (key, value) VALUES ('last_error', ?1)",
+                                [format!("{}: {e}", path.display())],
+                            );
+                        }
+                    } else if let Some(date) = path.file_stem().and_then(|s| s.to_str()) {
+                        if is_valid_date(date) {
+                            let _ = db::delete_date(conn, date);
                         }
                     }
                 }

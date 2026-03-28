@@ -39,6 +39,38 @@ pub fn execute(
     Ok(())
 }
 
+/// Validate a core field value before writing.
+fn validate_core_field(field: &str, value: &str) -> Result<()> {
+    match field {
+        "weight" => {
+            let w: f64 = value.parse().map_err(|_| {
+                color_eyre::eyre::eyre!(
+                    "Invalid weight: '{value}'. Expected a number (e.g., 173.4)"
+                )
+            })?;
+            if w <= 0.0 || w > 1000.0 {
+                bail!("Invalid weight: {w}. Expected a value between 0 and 1000");
+            }
+        }
+        "mood" | "energy" | "sleep_quality" => {
+            let n: i32 = value
+                .parse()
+                .map_err(|_| color_eyre::eyre::eyre!("Invalid {field}: '{value}'. Expected 1-5"))?;
+            if !(1..=5).contains(&n) {
+                bail!("Invalid {field}: {n}. Expected 1-5");
+            }
+        }
+        "sleep" => {
+            // Must contain a dash separating start-end times
+            if !value.contains('-') {
+                bail!("Invalid sleep format: '{value}'. Expected start-end (e.g., 10:30pm-6:15am)");
+            }
+        }
+        _ => {}
+    }
+    Ok(())
+}
+
 /// Route a field name to the correct frontmatter edit operation.
 fn route_field(
     field: &str,
@@ -47,18 +79,28 @@ fn route_field(
     content: &str,
     modules: &[Box<dyn Module>],
 ) -> Result<String> {
-    // Core fields handled directly
+    // Core fields: validate then write
     match field {
-        "weight" => return Ok(frontmatter::set_scalar(content, "weight", joined)),
+        "weight" => {
+            validate_core_field("weight", joined)?;
+            return Ok(frontmatter::set_scalar(content, "weight", joined));
+        }
         "sleep" => {
+            validate_core_field("sleep", joined)?;
             return Ok(frontmatter::set_scalar(
                 content,
                 "sleep",
                 &format!("\"{}\"", joined),
-            ))
+            ));
         }
-        "mood" => return Ok(frontmatter::set_scalar(content, "mood", joined)),
-        "energy" => return Ok(frontmatter::set_scalar(content, "energy", joined)),
+        "mood" => {
+            validate_core_field("mood", joined)?;
+            return Ok(frontmatter::set_scalar(content, "mood", joined));
+        }
+        "energy" => {
+            validate_core_field("energy", joined)?;
+            return Ok(frontmatter::set_scalar(content, "energy", joined));
+        }
         _ => {}
     }
 
@@ -166,6 +208,80 @@ Good session.
         let value = vec!["resting_hr".to_string()];
         let result = route_field("metric", &value, "resting_hr", SAMPLE, &empty_modules());
         assert!(result.is_err());
+    }
+
+    // -- Input validation tests --
+
+    #[test]
+    fn test_reject_invalid_weight() {
+        let result = route_field(
+            "weight",
+            &["banana".into()],
+            "banana",
+            SAMPLE,
+            &empty_modules(),
+        );
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Invalid weight"));
+    }
+
+    #[test]
+    fn test_reject_negative_weight() {
+        let result = route_field("weight", &["-5".into()], "-5", SAMPLE, &empty_modules());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_reject_mood_out_of_range() {
+        let result = route_field("mood", &["999".into()], "999", SAMPLE, &empty_modules());
+        assert!(result.is_err());
+        assert!(result.unwrap_err().to_string().contains("Expected 1-5"));
+    }
+
+    #[test]
+    fn test_reject_mood_not_number() {
+        let result = route_field("mood", &["great".into()], "great", SAMPLE, &empty_modules());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_reject_energy_zero() {
+        let result = route_field("energy", &["0".into()], "0", SAMPLE, &empty_modules());
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_reject_sleep_no_dash() {
+        let result = route_field("sleep", &["10pm".into()], "10pm", SAMPLE, &empty_modules());
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Expected start-end"));
+    }
+
+    #[test]
+    fn test_accept_valid_inputs() {
+        // These should all succeed
+        route_field(
+            "weight",
+            &["173.4".into()],
+            "173.4",
+            SAMPLE,
+            &empty_modules(),
+        )
+        .unwrap();
+        route_field("mood", &["1".into()], "1", SAMPLE, &empty_modules()).unwrap();
+        route_field("mood", &["5".into()], "5", SAMPLE, &empty_modules()).unwrap();
+        route_field("energy", &["3".into()], "3", SAMPLE, &empty_modules()).unwrap();
+        route_field(
+            "sleep",
+            &["10pm-6am".into()],
+            "10pm-6am",
+            SAMPLE,
+            &empty_modules(),
+        )
+        .unwrap();
     }
 
     // -- Module routing tests using real Training module --
