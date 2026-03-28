@@ -9,7 +9,8 @@ Set WindowBar Colorful
 Set TypingSpeed 40ms
 Set CursorBlink false
 
-Env PATH "/home/tyler/Coding/daylog/target/release:/usr/local/sbin:/usr/local/bin:/usr/bin:/home/tyler/.local/bin:/usr/lib/rustup/bin"
+# NOTE: Update this PATH to include your local daylog binary before recording
+# Env PATH "/path/to/daylog/target/release:/usr/local/bin:/usr/bin"
 
 Sleep 500ms
 Type "daylog log weight 173.4"

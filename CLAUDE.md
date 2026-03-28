@@ -43,20 +43,14 @@ src/
   cli/
     mod.rs             Clap CLI definition
     log_cmd.rs         `daylog log` — write to today's note
-    status_cmd.rs      `daylog status --json` output
-    sync_cmd.rs        `daylog sync` one-shot materialize
-    edit_cmd.rs        `daylog edit` open in $EDITOR
     completions.rs     Shell completion generation
   modules/
-    mod.rs             Module trait + registry + InsertOp + YamlPath
+    mod.rs             Module trait + registry + InsertOp + YamlPath + parse_color
     dashboard.rs       Today's vitals (sleep, weight, mood, energy)
     training.rs        Sessions, lifts, TSB gauge (owns sessions + lift_sets tables)
     trends.rs          Sparklines for exercises + custom metrics
-    climbing/          Optional reference module
-      mod.rs           Module trait impl, ClimbingConfig
-      normalize.rs     Grade parsing, board normalization
-      db.rs            Climbs table, pyramid/progression queries
-      ui.rs            Pyramid chart, grade progression, finger strength
+    climbing/
+      mod.rs           Opt-in reference module: normalize, draw, grade parsing
 ```
 
 ## Development
