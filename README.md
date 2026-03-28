@@ -1,18 +1,29 @@
 # daylog
 
+[![CI](https://github.com/tfolkman/daylog/actions/workflows/ci.yml/badge.svg)](https://github.com/tfolkman/daylog/actions/workflows/ci.yml)
+[![crates.io](https://img.shields.io/crates/v/daylog.svg)](https://crates.io/crates/daylog)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+
 A terminal dashboard that tracks your life from markdown notes.
 
 ![daylog demo](tapes/demo.gif)
 
-## Quick Start
+## Install
 
 ```bash
 cargo install daylog
+```
+
+Or download a pre-built binary from [GitHub Releases](https://github.com/tfolkman/daylog/releases).
+
+## Quick Start
+
+```bash
 daylog init
 daylog
 ```
 
-Three commands to a working dashboard. No API keys, no Docker, no config files to write.
+Two commands to a working dashboard. No API keys, no Docker, no config files to write.
 
 ## What It Does
 
