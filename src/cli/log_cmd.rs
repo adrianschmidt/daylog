@@ -423,7 +423,7 @@ Good session.
     fn test_config_with_dir(notes_dir: &str) -> Config {
         let toml_str = format!(
             r#"
-notes_dir = "{notes_dir}"
+notes_dir = '{notes_dir}'
 
 [modules]
 dashboard = true
@@ -432,6 +432,8 @@ trends = true
 climbing = false
 "#
         );
+        // Replace backslashes for Windows paths (TOML uses \\ or single-quoted literals)
+        let toml_str = toml_str.replace('\\', "/");
         toml::from_str(&toml_str).unwrap()
     }
 }
