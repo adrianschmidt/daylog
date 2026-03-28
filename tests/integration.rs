@@ -5,9 +5,11 @@ use daylog::modules;
 fn setup_test_env() -> (tempfile::TempDir, Config) {
     let dir = tempfile::TempDir::new().unwrap();
     let notes_dir = dir.path().to_path_buf();
+    // Use forward slashes for Windows compatibility in TOML
+    let notes_dir_str = notes_dir.display().to_string().replace('\\', "/");
     let toml_str = format!(
         r#"
-notes_dir = "{}"
+notes_dir = "{notes_dir_str}"
 
 [modules]
 dashboard = true
@@ -21,8 +23,7 @@ pullup = {{ display = "Pullup", color = "blue" }}
 
 [metrics]
 resting_hr = {{ display = "Resting HR", color = "red", unit = "bpm" }}
-"#,
-        notes_dir.display()
+"#
     );
     let config: Config = toml::from_str(&toml_str).unwrap();
     (dir, config)
