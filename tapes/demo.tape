@@ -1,39 +1,43 @@
-# Record: vhs tapes/demo.tape
-# Prereq: daylog init && daylog sync (need populated demo data)
-
 Output tapes/demo.gif
-Require daylog
-Require jq
 Set Shell fish
-Set FontSize 15
-Set Width 900
-Set Height 550
+Set FontSize 32
+Set Width 1200
+Set Height 700
 Set Padding 20
 Set Theme "Catppuccin Mocha"
+Set WindowBar Colorful
 Set TypingSpeed 40ms
+Set CursorBlink false
+
+Env PATH "/home/tyler/Coding/daylog/target/release:/usr/local/sbin:/usr/local/bin:/usr/bin:/home/tyler/.local/bin:/usr/lib/rustup/bin"
 
 Sleep 500ms
-
 Type "daylog log weight 173.4"
 Enter
-Sleep 700ms
-
-Type "daylog log sleep 10:30pm-6:15am"
-Enter
-Sleep 700ms
-
-Type "daylog log mood 4"
-Enter
-Sleep 700ms
+Sleep 600ms
 
 Type "daylog log lift squat 185x5, 205x3, 225x1"
 Enter
-Sleep 700ms
+Sleep 600ms
 
-Type "daylog log metric resting_hr 52"
+Type "daylog log sleep 10:30pm-6:15am"
 Enter
 Sleep 1s
 
-Type "daylog status | jq .today"
+Type "daylog"
 Enter
-Sleep 4s
+Wait+Screen /Dashboard/
+Sleep 3s
+
+Tab
+Sleep 2500ms
+
+Tab
+Sleep 2500ms
+
+Left
+Left
+Sleep 2s
+
+Type "q"
+Sleep 2s

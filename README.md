@@ -2,7 +2,7 @@
 
 A terminal dashboard that tracks your life from markdown notes.
 
-<!-- TODO: Hero GIF here -->
+![daylog demo](tapes/demo.gif)
 
 ## Quick Start
 
