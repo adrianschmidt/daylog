@@ -1,0 +1,33 @@
+notes_dir = "~/daylog-notes"
+# db_path defaults to {notes_dir}/.daylog.db
+# refresh_secs = 15
+
+[modules]
+dashboard = true
+training = true
+trends = true
+# climbing = false   # opt-in: most users don't climb
+
+[exercises]
+# Any exercise. Config-driven, no code needed.
+# Format: name = { display = "Display Name", color = "color" }
+# Colors: red, green, blue, yellow, cyan, magenta, white
+squat = { display = "Squat", color = "cyan" }
+bench = { display = "Bench", color = "green" }
+deadlift = { display = "Deadlift", color = "yellow" }
+ohp = { display = "OHP", color = "magenta" }
+pullup = { display = "Pullup", color = "blue" }
+rdl = { display = "RDL", color = "red" }
+
+[metrics]
+# Any numeric value. Config-driven, no code needed.
+# Format: name = { display = "Display Name", color = "color", unit = "unit" }
+# resting_hr = { display = "Resting HR", color = "red", unit = "bpm" }
+# meditation_min = { display = "Meditation", color = "magenta", unit = "min" }
+
+# [climbing]
+# target_hang_weight = 0.0
+# [climbing.board_adjustments]
+# moonboard = 3
+# kilter = 1
+# tension = 1

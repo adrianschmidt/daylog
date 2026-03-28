@@ -1,0 +1,271 @@
+use chrono::Local;
+use color_eyre::eyre::{bail, Result};
+
+use crate::config::Config;
+use crate::frontmatter;
+use crate::modules::{Module, YamlPath};
+
+/// Execute the `daylog log <field> <value...>` command.
+///
+/// Writes a value to today's daily note frontmatter.
+pub fn execute(
+    field: &str,
+    value: &[String],
+    config: &Config,
+    modules: &[Box<dyn Module>],
+) -> Result<()> {
+    let joined = value.join(" ");
+    if joined.is_empty() {
+        bail!("No value provided for field '{field}'");
+    }
+
+    let today = Local::now().format("%Y-%m-%d").to_string();
+    let note_path = config.notes_dir_path().join(format!("{today}.md"));
+
+    // Read or create today's note
+    let content = if note_path.exists() {
+        std::fs::read_to_string(&note_path)?
+    } else {
+        let template = include_str!("../../templates/daily-note.md");
+        template.replace("DATE_PLACEHOLDER", &today)
+    };
+
+    // Apply the edit based on field routing
+    let updated = route_field(field, value, &joined, &content, modules)?;
+
+    // Write atomically
+    frontmatter::atomic_write(&note_path, &updated)?;
+    eprintln!("Updated {today}");
+    Ok(())
+}
+
+/// Route a field name to the correct frontmatter edit operation.
+fn route_field(
+    field: &str,
+    value: &[String],
+    joined: &str,
+    content: &str,
+    modules: &[Box<dyn Module>],
+) -> Result<String> {
+    // Core fields handled directly
+    match field {
+        "weight" => return Ok(frontmatter::set_scalar(content, "weight", joined)),
+        "sleep" => {
+            return Ok(frontmatter::set_scalar(
+                content,
+                "sleep",
+                &format!("\"{}\"", joined),
+            ))
+        }
+        "mood" => return Ok(frontmatter::set_scalar(content, "mood", joined)),
+        "energy" => return Ok(frontmatter::set_scalar(content, "energy", joined)),
+        _ => {}
+    }
+
+    // Special case: metric field
+    if field == "metric" {
+        if value.len() < 2 {
+            bail!("Usage: daylog log metric <name> <value>");
+        }
+        let subfield = &value[0];
+        let remaining = value[1..].join(" ");
+        return Ok(frontmatter::set_scalar(content, subfield, &remaining));
+    }
+
+    // Module fields: extract first token as potential subfield
+    let first_token = value.first().map(|s| s.as_str()).unwrap_or("");
+
+    for module in modules {
+        if let Some(yaml_path) = module.log_field_path(field, first_token) {
+            return match yaml_path {
+                YamlPath::Scalar(key) => Ok(frontmatter::set_scalar(content, &key, joined)),
+                YamlPath::Nested(parent, child) => {
+                    let remaining = value[1..].join(" ");
+                    if remaining.is_empty() {
+                        bail!("Usage: daylog log {field} <subfield> <value>");
+                    }
+                    Ok(frontmatter::set_nested(
+                        content, &parent, &child, &remaining,
+                    ))
+                }
+                YamlPath::ListAppend(key) => Ok(frontmatter::append_to_list(content, &key, joined)),
+            };
+        }
+    }
+
+    bail!("Unknown field '{field}'. Available: weight, sleep, mood, energy, lift, climb, metric")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SAMPLE: &str = "---
+date: 2026-03-28
+sleep: \"10:30pm-6:15am\"
+weight: 173.4
+mood: 4
+lifts:
+  squat: 185x5, 185x5
+  bench: 135x8
+---
+
+## Notes
+
+Good session.
+";
+
+    fn empty_modules() -> Vec<Box<dyn Module>> {
+        vec![]
+    }
+
+    // -- Core field routing tests --
+
+    #[test]
+    fn test_route_weight() {
+        let value = vec!["175.0".to_string()];
+        let result = route_field("weight", &value, "175.0", SAMPLE, &empty_modules()).unwrap();
+        assert!(result.contains("weight: 175.0"));
+        assert!(!result.contains("173.4"));
+    }
+
+    #[test]
+    fn test_route_sleep() {
+        let value = vec!["11pm-7am".to_string()];
+        let result = route_field("sleep", &value, "11pm-7am", SAMPLE, &empty_modules()).unwrap();
+        assert!(result.contains("sleep: \"11pm-7am\""));
+    }
+
+    #[test]
+    fn test_route_mood() {
+        let value = vec!["5".to_string()];
+        let result = route_field("mood", &value, "5", SAMPLE, &empty_modules()).unwrap();
+        assert!(result.contains("mood: 5"));
+        assert!(!result.contains("mood: 4"));
+    }
+
+    #[test]
+    fn test_route_energy() {
+        let value = vec!["3".to_string()];
+        let result = route_field("energy", &value, "3", SAMPLE, &empty_modules()).unwrap();
+        assert!(result.contains("energy: 3"));
+    }
+
+    // -- Metric routing --
+
+    #[test]
+    fn test_route_metric() {
+        let value = vec!["resting_hr".to_string(), "52".to_string()];
+        let result =
+            route_field("metric", &value, "resting_hr 52", SAMPLE, &empty_modules()).unwrap();
+        assert!(result.contains("resting_hr: 52"));
+    }
+
+    #[test]
+    fn test_route_metric_missing_value() {
+        let value = vec!["resting_hr".to_string()];
+        let result = route_field("metric", &value, "resting_hr", SAMPLE, &empty_modules());
+        assert!(result.is_err());
+    }
+
+    // -- Module routing tests using real Training module --
+
+    #[test]
+    fn test_route_lift_nested() {
+        let config = test_config();
+        let modules = crate::modules::build_registry(&config);
+        let value = vec!["pullup".to_string(), "BWx8".to_string()];
+        let result = route_field("lift", &value, "pullup BWx8", SAMPLE, &modules).unwrap();
+        assert!(result.contains("  pullup: BWx8"));
+        // Existing lifts preserved
+        assert!(result.contains("  squat: 185x5, 185x5"));
+    }
+
+    #[test]
+    fn test_route_lift_missing_value() {
+        let config = test_config();
+        let modules = crate::modules::build_registry(&config);
+        let value = vec!["pullup".to_string()];
+        let result = route_field("lift", &value, "pullup", SAMPLE, &modules);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_route_unknown_field() {
+        let result = route_field("banana", &["x".to_string()], "x", SAMPLE, &empty_modules());
+        assert!(result.is_err());
+        let err = result.unwrap_err().to_string();
+        assert!(err.contains("Unknown field"));
+    }
+
+    // -- File creation from template --
+
+    #[test]
+    fn test_file_creation_from_template() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let notes_dir = dir.path().to_path_buf();
+        let config = test_config_with_dir(notes_dir.to_str().unwrap());
+        let modules = crate::modules::build_registry(&config);
+
+        let today = Local::now().format("%Y-%m-%d").to_string();
+        let note_path = notes_dir.join(format!("{today}.md"));
+
+        // Note should not exist yet
+        assert!(!note_path.exists());
+
+        execute("weight", &["173.4".to_string()], &config, &modules).unwrap();
+
+        // Note should now exist
+        assert!(note_path.exists());
+        let content = std::fs::read_to_string(&note_path).unwrap();
+        assert!(content.contains(&format!("date: {today}")));
+        assert!(content.contains("weight: 173.4"));
+    }
+
+    // -- Atomic write --
+
+    #[test]
+    fn test_atomic_write_roundtrip() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let notes_dir = dir.path().to_path_buf();
+        let config = test_config_with_dir(notes_dir.to_str().unwrap());
+        let modules = crate::modules::build_registry(&config);
+
+        // First write creates the file
+        execute("weight", &["173.4".to_string()], &config, &modules).unwrap();
+
+        let today = Local::now().format("%Y-%m-%d").to_string();
+        let note_path = notes_dir.join(format!("{today}.md"));
+
+        // Second write updates atomically
+        execute("mood", &["5".to_string()], &config, &modules).unwrap();
+
+        let content = std::fs::read_to_string(&note_path).unwrap();
+        assert!(content.contains("weight: 173.4"));
+        assert!(content.contains("mood: 5"));
+    }
+
+    // -- Test helpers --
+
+    fn test_config() -> Config {
+        let dir = tempfile::TempDir::new().unwrap();
+        // Leak the TempDir so it lives for the duration of the test
+        let dir = Box::leak(Box::new(dir));
+        test_config_with_dir(dir.path().to_str().unwrap())
+    }
+
+    fn test_config_with_dir(notes_dir: &str) -> Config {
+        let toml_str = format!(
+            r#"
+notes_dir = "{notes_dir}"
+
+[modules]
+dashboard = true
+training = true
+trends = true
+climbing = false
+"#
+        );
+        toml::from_str(&toml_str).unwrap()
+    }
+}
