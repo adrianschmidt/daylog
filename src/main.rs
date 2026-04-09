@@ -144,6 +144,7 @@ fn cmd_status() -> Result<()> {
     let mut output = serde_json::json!({
         "effective_date": &today,
         "day_start_hour": config.day_start_hour,
+        "weight_unit": config.weight_unit.to_string(),
     });
     if let Some(day_data) = db::load_today(&conn, &today)? {
         output["today"] = day_data;
