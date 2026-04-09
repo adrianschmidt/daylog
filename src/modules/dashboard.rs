@@ -115,7 +115,7 @@ impl Module for Dashboard {
                 let weight_line = match weight {
                     Some(w) => vec![
                         Span::styled("Weight: ", Style::default().fg(Color::Blue)),
-                        Span::raw(format!("{w:.1}")),
+                        Span::raw(format!("{w:.1} {}", config.weight_unit)),
                     ],
                     None => vec![
                         Span::styled("Weight: ", Style::default().fg(Color::Blue)),
