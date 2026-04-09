@@ -173,7 +173,7 @@ impl Module for Climbing {
         Ok(ops)
     }
 
-    fn draw(&self, f: &mut Frame, area: Rect, conn: &Connection, _config: &Config) {
+    fn draw(&self, f: &mut Frame, area: Rect, conn: &Connection, config: &Config) {
         let outer_block = Block::default().borders(Borders::ALL).title(" Climbing ");
 
         let inner = outer_block.inner(area);
@@ -187,13 +187,15 @@ impl Module for Climbing {
         ])
         .split(inner);
 
-        self.draw_grade_pyramid(f, chunks[0], conn);
-        self.draw_weekly_max(f, chunks[1], conn);
-        self.draw_session_summary(f, chunks[2], conn);
+        let today_date = config.effective_today_date();
+        let today = today_date.format("%Y-%m-%d").to_string();
+        self.draw_grade_pyramid(f, chunks[0], conn, today_date);
+        self.draw_weekly_max(f, chunks[1], conn, today_date);
+        self.draw_session_summary(f, chunks[2], conn, &today);
     }
 
-    fn status_json(&self, conn: &Connection, _config: &Config) -> Option<serde_json::Value> {
-        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    fn status_json(&self, conn: &Connection, config: &Config) -> Option<serde_json::Value> {
+        let today = config.effective_today();
 
         let today_sends: i64 = conn
             .query_row(
@@ -247,7 +249,13 @@ impl Module for Climbing {
 // --- Draw helpers ---
 
 impl Climbing {
-    fn draw_grade_pyramid(&self, f: &mut Frame, area: Rect, conn: &Connection) {
+    fn draw_grade_pyramid(
+        &self,
+        f: &mut Frame,
+        area: Rect,
+        conn: &Connection,
+        today_date: chrono::NaiveDate,
+    ) {
         let block = Block::default()
             .borders(Borders::ALL)
             .title(" Grade Pyramid (8 wk sends) ");
@@ -255,11 +263,12 @@ impl Climbing {
         let inner = block.inner(area);
         f.render_widget(block, area);
 
-        // Query send distribution over last 8 weeks
-        let cutoff = chrono::Local::now()
-            .checked_sub_signed(chrono::Duration::weeks(8))
-            .map(|d| d.format("%Y-%m-%d").to_string())
-            .unwrap_or_default();
+        // Query send distribution over last 8 weeks from effective date
+        let cutoff = today_date
+            .checked_sub_days(chrono::Days::new(8 * 7))
+            .unwrap_or(today_date)
+            .format("%Y-%m-%d")
+            .to_string();
 
         let rows = query_grade_distribution(conn, &cutoff);
 
@@ -289,7 +298,13 @@ impl Climbing {
         f.render_widget(chart, inner);
     }
 
-    fn draw_weekly_max(&self, f: &mut Frame, area: Rect, conn: &Connection) {
+    fn draw_weekly_max(
+        &self,
+        f: &mut Frame,
+        area: Rect,
+        conn: &Connection,
+        today_date: chrono::NaiveDate,
+    ) {
         let block = Block::default()
             .borders(Borders::ALL)
             .title(" Weekly Max Send (12 wk) ");
@@ -297,10 +312,11 @@ impl Climbing {
         let inner = block.inner(area);
         f.render_widget(block, area);
 
-        let cutoff = chrono::Local::now()
-            .checked_sub_signed(chrono::Duration::weeks(12))
-            .map(|d| d.format("%Y-%m-%d").to_string())
-            .unwrap_or_default();
+        let cutoff = today_date
+            .checked_sub_days(chrono::Days::new(12 * 7))
+            .unwrap_or(today_date)
+            .format("%Y-%m-%d")
+            .to_string();
 
         let weekly_maxes = query_weekly_max(conn, &cutoff);
 
@@ -335,15 +351,13 @@ impl Climbing {
         f.render_widget(paragraph, inner);
     }
 
-    fn draw_session_summary(&self, f: &mut Frame, area: Rect, conn: &Connection) {
+    fn draw_session_summary(&self, f: &mut Frame, area: Rect, conn: &Connection, today: &str) {
         let block = Block::default()
             .borders(Borders::ALL)
             .title(" Today's Session ");
 
         let inner = block.inner(area);
         f.render_widget(block, area);
-
-        let today = chrono::Local::now().format("%Y-%m-%d").to_string();
 
         let sends: i64 = conn
             .query_row(

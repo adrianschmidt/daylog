@@ -4,6 +4,10 @@ use std::fmt::Write as FmtWrite;
 use std::path::Path;
 
 /// Generate 14 days of realistic demo data.
+///
+/// Note: uses raw `Local::now()` rather than `Config::effective_today()` because
+/// demo generation runs before the TUI starts and does not load config. If
+/// `day_start_hour` is set, demo dates may be off by one day at the boundary.
 pub fn generate_demo_data(notes_dir: &Path) -> Result<u32> {
     let today = Local::now().date_naive();
     let mut count = 0;
