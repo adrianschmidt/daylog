@@ -201,6 +201,11 @@ fn parse_time_to_minutes(time: &str, is_bedtime: bool) -> Option<i32> {
 // --- Core Normalization ---
 
 /// Parse and normalize a single note file, inserting into the database.
+///
+/// Dates are derived from filenames (YYYY-MM-DD.md), not from `effective_today()`.
+/// This is intentional: the materializer processes historical notes whose dates are
+/// already encoded in the filename, whereas `effective_today()` only applies to
+/// determining which file to write to during live logging.
 pub fn materialize_file(
     conn: &Connection,
     file_path: &Path,

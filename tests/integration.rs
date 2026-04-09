@@ -65,7 +65,7 @@ fn test_full_roundtrip() {
     .unwrap();
 
     // 2. Verify the note file exists and has correct content
-    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let today = config.effective_today();
     let note_path = dir.path().join(format!("{today}.md"));
     assert!(note_path.exists(), "Note file should exist");
     let content = std::fs::read_to_string(&note_path).unwrap();

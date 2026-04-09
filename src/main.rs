@@ -139,9 +139,12 @@ fn cmd_status() -> Result<()> {
     }
 
     let conn = db::open_ro(&db_path)?;
-    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let today = config.effective_today();
 
-    let mut output = serde_json::json!({});
+    let mut output = serde_json::json!({
+        "effective_date": &today,
+        "day_start_hour": config.day_start_hour,
+    });
     if let Some(day_data) = db::load_today(&conn, &today)? {
         output["today"] = day_data;
     }
@@ -178,7 +181,7 @@ fn cmd_edit(date: Option<&str>) -> Result<()> {
     let config = Config::load()?;
     let date_str = match date {
         Some(d) => d.to_string(),
-        None => chrono::Local::now().format("%Y-%m-%d").to_string(),
+        None => config.effective_today(),
     };
     let note_path = config.notes_dir_path().join(format!("{date_str}.md"));
 
@@ -186,6 +189,17 @@ fn cmd_edit(date: Option<&str>) -> Result<()> {
         let template = include_str!("../templates/daily-note.md");
         let content = template.replace("DATE_PLACEHOLDER", &date_str);
         std::fs::write(&note_path, content)?;
+    }
+
+    // Show day-boundary hint when effective date differs from calendar date
+    if date.is_none() {
+        let calendar_today = chrono::Local::now().format("%Y-%m-%d").to_string();
+        if date_str != calendar_today {
+            eprintln!(
+                "Editing {date_str} (day boundary: before {}:00)",
+                config.day_start_hour
+            );
+        }
     }
 
     let editor = std::env::var("EDITOR")

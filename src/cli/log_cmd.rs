@@ -1,4 +1,3 @@
-use chrono::Local;
 use color_eyre::eyre::{bail, Result};
 
 use crate::config::Config;
@@ -19,7 +18,7 @@ pub fn execute(
         bail!("No value provided for field '{field}'");
     }
 
-    let today = Local::now().format("%Y-%m-%d").to_string();
+    let today = config.effective_today();
     let note_path = config.notes_dir_path().join(format!("{today}.md"));
 
     // Read or create today's note
@@ -35,7 +34,16 @@ pub fn execute(
 
     // Write atomically
     frontmatter::atomic_write(&note_path, &updated)?;
-    eprintln!("Updated {today}");
+
+    let calendar_today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    if today != calendar_today {
+        eprintln!(
+            "Updated {today} (day boundary: before {}:00)",
+            config.day_start_hour
+        );
+    } else {
+        eprintln!("Updated {today}");
+    }
     Ok(())
 }
 
@@ -373,7 +381,7 @@ Good session.
         let config = test_config_with_dir(notes_dir.to_str().unwrap());
         let modules = crate::modules::build_registry(&config);
 
-        let today = Local::now().format("%Y-%m-%d").to_string();
+        let today = config.effective_today();
         let note_path = notes_dir.join(format!("{today}.md"));
 
         // Note should not exist yet
@@ -400,7 +408,7 @@ Good session.
         // First write creates the file
         execute("weight", &["173.4".to_string()], &config, &modules).unwrap();
 
-        let today = Local::now().format("%Y-%m-%d").to_string();
+        let today = config.effective_today();
         let note_path = notes_dir.join(format!("{today}.md"));
 
         // Second write updates atomically
