@@ -68,11 +68,9 @@ fn validate_core_field(field: &str, value: &str, config: &Config) -> Result<()> 
                 bail!("Invalid {field}: {n}. Expected 1-5");
             }
         }
-        "sleep" => {
-            // Must contain a dash separating start-end times
-            if !value.contains('-') {
-                bail!("Invalid sleep format: '{value}'. Expected start-end (e.g., 10:30pm-6:15am)");
-            }
+        // sleep value must contain a dash separating start-end times
+        "sleep" if !value.contains('-') => {
+            bail!("Invalid sleep format: '{value}'. Expected start-end (e.g., 10:30pm-6:15am)");
         }
         _ => {}
     }
