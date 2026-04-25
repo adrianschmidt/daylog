@@ -25,8 +25,7 @@ pub fn execute(
     let content = if note_path.exists() {
         std::fs::read_to_string(&note_path)?
     } else {
-        let template = include_str!("../../templates/daily-note.md");
-        template.replace("DATE_PLACEHOLDER", &today)
+        crate::template::render_daily_note(&today, config)
     };
 
     // Apply the edit based on field routing

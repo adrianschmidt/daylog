@@ -187,8 +187,7 @@ fn cmd_edit(date: Option<&str>) -> Result<()> {
     let note_path = config.notes_dir_path().join(format!("{date_str}.md"));
 
     if !note_path.exists() {
-        let template = include_str!("../templates/daily-note.md");
-        let content = template.replace("DATE_PLACEHOLDER", &date_str);
+        let content = daylog::template::render_daily_note(&date_str, &config);
         std::fs::write(&note_path, content)?;
     }
 
