@@ -29,29 +29,29 @@ fn rating_color(value: i32) -> Color {
 }
 
 /// Format the sleep-line text for the dashboard.
-/// Reads canonical 24h `HH:MM` from the DB and renders per `fmt`.
-pub(crate) fn format_sleep_line(
+///
+/// `sleep_start` / `sleep_end` are canonical 24h `HH:MM` as written by
+/// the materializer (Task 5). They get reformatted per `fmt`. If parsing
+/// fails (DB corruption), falls back to the raw `start-end` string.
+/// Returns `None` if any of start/end/hours is missing.
+fn format_sleep_line(
     sleep_start: Option<&str>,
     sleep_end: Option<&str>,
     sleep_hours: Option<f64>,
     sleep_quality: Option<i32>,
     fmt: crate::config::TimeFormat,
-) -> String {
-    match (sleep_start, sleep_end, sleep_hours) {
-        (Some(start), Some(end), Some(hours)) => {
-            let start_t = crate::time::parse_time(start);
-            let end_t = crate::time::parse_time(end);
-            let range = match (start_t, end_t) {
-                (Some(s), Some(e)) => crate::time::format_sleep_range(s, e, fmt),
-                _ => format!("{start}-{end}"),
-            };
-            let quality_str = sleep_quality
-                .map(|q| format!("  quality: {q}/5"))
-                .unwrap_or_default();
-            format!("{range}  ({hours:.1}h){quality_str}")
-        }
-        _ => "--".to_string(),
-    }
+) -> Option<String> {
+    let start = sleep_start?;
+    let end = sleep_end?;
+    let hours = sleep_hours?;
+    let range = match (crate::time::parse_time(start), crate::time::parse_time(end)) {
+        (Some(s), Some(e)) => crate::time::format_sleep_range(s, e, fmt),
+        _ => format!("{start}-{end}"),
+    };
+    let quality_str = sleep_quality
+        .map(|q| format!("  quality: {q}/5"))
+        .unwrap_or_default();
+    Some(format!("{range}  ({hours:.1}h){quality_str}"))
 }
 
 impl Module for Dashboard {
@@ -118,23 +118,21 @@ impl Module for Dashboard {
                 lines.push(Line::from(""));
 
                 // Sleep
-                let sleep_text = format_sleep_line(
+                let sleep_line = match format_sleep_line(
                     sleep_start.as_deref(),
                     sleep_end.as_deref(),
                     sleep_hours,
                     sleep_quality,
                     config.time_format,
-                );
-                let sleep_line = if sleep_text == "--" {
-                    vec![
+                ) {
+                    Some(text) => vec![
+                        Span::styled("Sleep: ", Style::default().fg(Color::Blue)),
+                        Span::raw(text),
+                    ],
+                    None => vec![
                         Span::styled("Sleep: ", Style::default().fg(Color::Blue)),
                         Span::styled("--", Style::default().fg(Color::DarkGray)),
-                    ]
-                } else {
-                    vec![
-                        Span::styled("Sleep: ", Style::default().fg(Color::Blue)),
-                        Span::raw(sleep_text),
-                    ]
+                    ],
                 };
                 lines.push(Line::from(sleep_line));
 
@@ -245,7 +243,8 @@ mod tests {
             Some(7.75),
             None,
             crate::config::TimeFormat::TwelveHour,
-        );
+        )
+        .unwrap();
         assert!(s.contains("10:30pm-6:15am"), "got: {s}");
         assert!(s.contains("(7.8h)"), "got: {s}");
     }
@@ -258,7 +257,8 @@ mod tests {
             Some(7.75),
             None,
             crate::config::TimeFormat::TwentyFourHour,
-        );
+        )
+        .unwrap();
         assert!(s.contains("22:30-06:15"), "got: {s}");
     }
 
@@ -270,13 +270,14 @@ mod tests {
             Some(7.75),
             Some(4),
             crate::config::TimeFormat::TwelveHour,
-        );
+        )
+        .unwrap();
         assert!(s.contains("quality: 4/5"), "got: {s}");
     }
 
     #[test]
-    fn sleep_line_missing_returns_dashes() {
+    fn sleep_line_missing_returns_none() {
         let s = format_sleep_line(None, None, None, None, crate::config::TimeFormat::TwelveHour);
-        assert!(s.contains("--"), "got: {s}");
+        assert!(s.is_none());
     }
 }
