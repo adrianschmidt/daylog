@@ -1,4 +1,29 @@
 use chrono::NaiveTime;
+use crate::config::TimeFormat;
+
+/// Format a `NaiveTime` per the given config format.
+///
+/// 24h: zero-padded `HH:MM` (`"06:05"`, `"22:30"`).
+/// 12h: lowercase suffix, no zero-padding on hour (`"6:05am"`, `"10:30pm"`,
+///      `"12:30am"` for midnight, `"12:00pm"` for noon). Always includes
+///      minutes for clarity in stored entries.
+pub fn format_time(t: NaiveTime, fmt: TimeFormat) -> String {
+    use chrono::Timelike;
+    let h = t.hour();
+    let m = t.minute();
+    match fmt {
+        TimeFormat::TwentyFourHour => format!("{h:02}:{m:02}"),
+        TimeFormat::TwelveHour => {
+            let (display_h, suffix) = match h {
+                0 => (12, "am"),
+                1..=11 => (h, "am"),
+                12 => (12, "pm"),
+                _ => (h - 12, "pm"),
+            };
+            format!("{display_h}:{m:02}{suffix}")
+        }
+    }
+}
 
 /// Parse a time string in either 12-hour (`10:30pm`, `6am`) or
 /// 24-hour (`22:30`, `0:28`, `06:52`) format. Case-insensitive.
@@ -58,6 +83,7 @@ pub fn parse_time(s: &str) -> Option<NaiveTime> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::TimeFormat;
 
     #[test]
     fn parse_24h_basic() {
@@ -106,5 +132,40 @@ mod tests {
     fn parse_strips_quotes() {
         assert_eq!(parse_time("\"22:30\""), NaiveTime::from_hms_opt(22, 30, 0));
         assert_eq!(parse_time("'10:30pm'"), NaiveTime::from_hms_opt(22, 30, 0));
+    }
+
+    #[test]
+    fn format_24h_zero_padded() {
+        let t = NaiveTime::from_hms_opt(22, 30, 0).unwrap();
+        assert_eq!(format_time(t, TimeFormat::TwentyFourHour), "22:30");
+        let t = NaiveTime::from_hms_opt(6, 5, 0).unwrap();
+        assert_eq!(format_time(t, TimeFormat::TwentyFourHour), "06:05");
+        let t = NaiveTime::from_hms_opt(0, 0, 0).unwrap();
+        assert_eq!(format_time(t, TimeFormat::TwentyFourHour), "00:00");
+    }
+
+    #[test]
+    fn format_12h_lowercase_no_hour_pad() {
+        let t = NaiveTime::from_hms_opt(22, 30, 0).unwrap();
+        assert_eq!(format_time(t, TimeFormat::TwelveHour), "10:30pm");
+        let t = NaiveTime::from_hms_opt(6, 15, 0).unwrap();
+        assert_eq!(format_time(t, TimeFormat::TwelveHour), "6:15am");
+        let t = NaiveTime::from_hms_opt(0, 30, 0).unwrap();
+        assert_eq!(format_time(t, TimeFormat::TwelveHour), "12:30am");
+        let t = NaiveTime::from_hms_opt(12, 0, 0).unwrap();
+        assert_eq!(format_time(t, TimeFormat::TwelveHour), "12:00pm");
+    }
+
+    #[test]
+    fn format_then_parse_roundtrip() {
+        for hour in 0..24 {
+            for min in [0, 1, 30, 59] {
+                let t = NaiveTime::from_hms_opt(hour, min, 0).unwrap();
+                for fmt in [TimeFormat::TwelveHour, TimeFormat::TwentyFourHour] {
+                    let s = format_time(t, fmt);
+                    assert_eq!(parse_time(&s), Some(t), "roundtrip failed for {s}");
+                }
+            }
+        }
     }
 }
