@@ -1,5 +1,5 @@
 use chrono::{Local, Timelike};
-use color_eyre::eyre::{bail, Result};
+use color_eyre::eyre::Result;
 use color_eyre::Help;
 
 use crate::config::Config;
@@ -55,9 +55,9 @@ pub fn cmd_sleep_end(time_arg: Option<&str>, config: &Config) -> Result<()> {
     let pending = match state.sleep_start.take() {
         Some(p) => p,
         None => {
-            bail!(
-                "No pending sleep-start. Run `daylog sleep-start` before bed, or use \
-                 `daylog log sleep \"HH:MM-HH:MM\"` for a one-shot entry."
+            return Err(color_eyre::eyre::eyre!("No pending sleep-start.")).suggestion(
+                "Run `daylog sleep-start` before bed, or use \
+                 `daylog log sleep \"HH:MM-HH:MM\"` for a one-shot entry.",
             );
         }
     };
@@ -65,11 +65,13 @@ pub fn cmd_sleep_end(time_arg: Option<&str>, config: &Config) -> Result<()> {
     let age = now.signed_duration_since(pending.recorded_at);
     if age > chrono::Duration::hours(MAX_PENDING_AGE_HOURS) {
         state::save(&notes_dir, &state)?;
-        bail!(
-            "No pending sleep-start (ignored stale sleep-start from {}). \
-             Run `daylog sleep-start` before bed, or use `daylog log sleep \
-             \"HH:MM-HH:MM\"` for a one-shot entry.",
+        return Err(color_eyre::eyre::eyre!(
+            "No pending sleep-start (ignored stale sleep-start from {}).",
             pending.recorded_at.format("%Y-%m-%d %H:%M")
+        ))
+        .suggestion(
+            "Run `daylog sleep-start` before bed, or use \
+             `daylog log sleep \"HH:MM-HH:MM\"` for a one-shot entry.",
         );
     }
 
@@ -254,5 +256,28 @@ mod tests {
         cmd_sleep_start(Some("22:30"), &cfg).unwrap();
         let err = cmd_sleep_end(Some("banana"), &cfg).unwrap_err();
         assert!(err.to_string().contains("Invalid time"));
+    }
+
+    // Regression guard: wake date must be calendar today, not effective_today().
+    // day_start_hour is set high so that any consultation of effective_today()
+    // would write to a different file; the assertion confirms calendar-today
+    // is used by the CLI, regardless of how day_start_hour is configured.
+    #[test]
+    fn sleep_end_uses_calendar_today_not_day_start_hour() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let toml_str = format!(
+            "notes_dir = '{}'\ntime_format = '24h'\nday_start_hour = 4\n",
+            dir.path().display().to_string().replace('\\', "/")
+        );
+        let cfg: Config = toml::from_str(&toml_str).unwrap();
+        cmd_sleep_start(Some("22:30"), &cfg).unwrap();
+        cmd_sleep_end(Some("06:15"), &cfg).unwrap();
+
+        let calendar_today = Local::now().format("%Y-%m-%d").to_string();
+        let calendar_path = dir.path().join(format!("{calendar_today}.md"));
+        assert!(
+            calendar_path.exists(),
+            "expected wake-date file at calendar-today {calendar_today}"
+        );
     }
 }
