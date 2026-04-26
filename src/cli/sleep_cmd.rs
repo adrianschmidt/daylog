@@ -19,12 +19,13 @@ pub fn cmd_sleep_start(time_arg: Option<&str>, config: &Config) -> Result<()> {
         None => now.time().with_second(0).expect("0 < 60"),
     };
 
-    let mut s = state::load(&config.notes_dir_path());
+    let notes_dir = config.notes_dir_path();
+    let mut s = state::load(&notes_dir);
     s.sleep_start = Some(PendingSleepStart {
         bedtime,
         recorded_at: now,
     });
-    state::save(&config.notes_dir_path(), &s)?;
+    state::save(&notes_dir, &s)?;
 
     eprintln!(
         "Sleep start recorded: {}",
@@ -62,8 +63,7 @@ pub fn cmd_sleep_end(time_arg: Option<&str>, config: &Config) -> Result<()> {
     };
 
     let age = now.signed_duration_since(pending.recorded_at);
-    if age.num_hours() > MAX_PENDING_AGE_HOURS {
-        // Clear stale state so the next sleep-start runs clean.
+    if age > chrono::Duration::hours(MAX_PENDING_AGE_HOURS) {
         state::save(&notes_dir, &state)?;
         bail!(
             "No pending sleep-start (ignored stale sleep-start from {}). \
