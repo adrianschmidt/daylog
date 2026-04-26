@@ -22,8 +22,20 @@ fn main() -> Result<()> {
             daylog::cli::completions::generate(shell);
             Ok(())
         }
+        Some(Commands::SleepStart { time }) => cmd_sleep_start(time.as_deref()),
+        Some(Commands::SleepEnd { time }) => cmd_sleep_end(time.as_deref()),
         None => cmd_run(),
     }
+}
+
+fn cmd_sleep_start(time: Option<&str>) -> Result<()> {
+    let config = Config::load()?;
+    daylog::cli::sleep_cmd::cmd_sleep_start(time, &config)
+}
+
+fn cmd_sleep_end(time: Option<&str>) -> Result<()> {
+    let config = Config::load()?;
+    daylog::cli::sleep_cmd::cmd_sleep_end(time, &config)
 }
 
 fn cmd_init(notes_dir_arg: Option<String>, no_demo: bool) -> Result<()> {

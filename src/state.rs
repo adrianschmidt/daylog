@@ -50,8 +50,7 @@ pub fn load(notes_dir: &Path) -> PendingState {
 /// Save pending state atomically.
 pub fn save(notes_dir: &Path, state: &PendingState) -> Result<()> {
     let path = state_path(notes_dir);
-    let contents =
-        toml::to_string(state).wrap_err("Failed to serialize pending state to TOML")?;
+    let contents = toml::to_string(state).wrap_err("Failed to serialize pending state to TOML")?;
     let dir = path
         .parent()
         .ok_or_else(|| color_eyre::eyre::eyre!("Invalid state path: {}", path.display()))?;

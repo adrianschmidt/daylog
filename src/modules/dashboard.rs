@@ -277,7 +277,13 @@ mod tests {
 
     #[test]
     fn sleep_line_missing_returns_none() {
-        let s = format_sleep_line(None, None, None, None, crate::config::TimeFormat::TwelveHour);
+        let s = format_sleep_line(
+            None,
+            None,
+            None,
+            None,
+            crate::config::TimeFormat::TwelveHour,
+        );
         assert!(s.is_none());
     }
 }

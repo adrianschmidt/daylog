@@ -1,5 +1,5 @@
-use chrono::NaiveTime;
 use crate::config::TimeFormat;
+use chrono::NaiveTime;
 
 /// Format a `NaiveTime` per the given config format.
 ///
