@@ -6,5 +6,6 @@ pub mod demo;
 pub mod frontmatter;
 pub mod materializer;
 pub mod modules;
+pub mod state;
 pub mod template;
 pub mod time;
