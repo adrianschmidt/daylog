@@ -1,5 +1,5 @@
 use chrono::{Local, Timelike};
-use color_eyre::eyre::Result;
+use color_eyre::eyre::{bail, Result};
 use color_eyre::Help;
 
 use crate::config::Config;
@@ -33,10 +33,78 @@ pub fn cmd_sleep_start(time_arg: Option<&str>, config: &Config) -> Result<()> {
     Ok(())
 }
 
+const MAX_PENDING_AGE_HOURS: i64 = 24;
+
+pub fn cmd_sleep_end(time_arg: Option<&str>, config: &Config) -> Result<()> {
+    let now = Local::now();
+    let wake = match time_arg {
+        Some(s) => time::parse_time(s)
+            .ok_or_else(|| {
+                color_eyre::eyre::eyre!(
+                    "Invalid time: '{s}'. Expected HH:MM (24h) or H:MMam/pm (12h)."
+                )
+            })
+            .suggestion("Use 24h form like 06:15 or 12h form like 6:15am.")?,
+        None => now.time().with_second(0).expect("0 < 60"),
+    };
+
+    let notes_dir = config.notes_dir_path();
+    let mut state = state::load(&notes_dir);
+
+    let pending = match state.sleep_start.take() {
+        Some(p) => p,
+        None => {
+            bail!(
+                "No pending sleep-start. Run `daylog sleep-start` before bed, or use \
+                 `daylog log sleep \"HH:MM-HH:MM\"` for a one-shot entry."
+            );
+        }
+    };
+
+    let age = now.signed_duration_since(pending.recorded_at);
+    if age.num_hours() > MAX_PENDING_AGE_HOURS {
+        // Clear stale state so the next sleep-start runs clean.
+        state::save(&notes_dir, &state)?;
+        bail!(
+            "No pending sleep-start (ignored stale sleep-start from {}). \
+             Run `daylog sleep-start` before bed, or use `daylog log sleep \
+             \"HH:MM-HH:MM\"` for a one-shot entry.",
+            pending.recorded_at.format("%Y-%m-%d %H:%M")
+        );
+    }
+
+    let bedtime = pending.bedtime;
+    let wake_date = now.date_naive();
+    let formatted = time::format_sleep_range(bedtime, wake, config.time_format);
+
+    let note_path = notes_dir.join(format!("{}.md", wake_date.format("%Y-%m-%d")));
+    let content = if note_path.exists() {
+        std::fs::read_to_string(&note_path)?
+    } else {
+        crate::template::render_daily_note(&wake_date.format("%Y-%m-%d").to_string(), config)
+    };
+    let updated = crate::frontmatter::set_scalar(
+        &content,
+        "sleep",
+        &format!("\"{}\"", formatted),
+    );
+    crate::frontmatter::atomic_write(&note_path, &updated)?;
+
+    state::save(&notes_dir, &state)?;
+
+    let hours = time::sleep_hours(bedtime, wake);
+    eprintln!(
+        "Sleep recorded: {formatted} ({hours:.2}h) on {}",
+        wake_date.format("%Y-%m-%d")
+    );
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use chrono::NaiveTime;
+    use std::path::Path;
 
     fn config_in(notes_dir: &std::path::Path, fmt: &str) -> Config {
         let toml_str = format!(
@@ -91,6 +159,104 @@ mod tests {
         let dir = tempfile::TempDir::new().unwrap();
         let cfg = config_in(dir.path(), "24h");
         let err = cmd_sleep_start(Some("banana"), &cfg).unwrap_err();
+        assert!(err.to_string().contains("Invalid time"));
+    }
+
+    fn read_today_note(notes_dir: &Path) -> String {
+        let today = Local::now().format("%Y-%m-%d").to_string();
+        std::fs::read_to_string(notes_dir.join(format!("{today}.md"))).unwrap()
+    }
+
+    #[test]
+    fn sleep_end_happy_path_writes_today_and_clears_state() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let cfg = config_in(dir.path(), "24h");
+        cmd_sleep_start(Some("22:30"), &cfg).unwrap();
+        cmd_sleep_end(Some("06:15"), &cfg).unwrap();
+
+        let note = read_today_note(dir.path());
+        assert!(
+            note.contains("sleep: \"22:30-06:15\""),
+            "expected canonical 24h sleep entry, got: {note}"
+        );
+
+        let s = state::load(dir.path());
+        assert!(
+            s.sleep_start.is_none(),
+            "pending state should be cleared after sleep-end"
+        );
+    }
+
+    #[test]
+    fn sleep_end_uses_time_format_12h() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let cfg = config_in(dir.path(), "12h");
+        cmd_sleep_start(Some("22:30"), &cfg).unwrap();
+        cmd_sleep_end(Some("06:15"), &cfg).unwrap();
+
+        let note = read_today_note(dir.path());
+        assert!(
+            note.contains("sleep: \"10:30pm-6:15am\""),
+            "expected 12h-formatted sleep entry, got: {note}"
+        );
+    }
+
+    #[test]
+    fn sleep_end_no_pending_errors() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let cfg = config_in(dir.path(), "24h");
+        let err = cmd_sleep_end(Some("06:15"), &cfg).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("No pending sleep-start"), "got: {msg}");
+    }
+
+    #[test]
+    fn sleep_end_stale_pending_errors_and_clears_state() {
+        use crate::state::PendingState;
+
+        let dir = tempfile::TempDir::new().unwrap();
+        let cfg = config_in(dir.path(), "24h");
+
+        // Manually save state with a recorded_at >24h ago.
+        let stale = Local::now() - chrono::Duration::hours(25);
+        let s = PendingState {
+            sleep_start: Some(PendingSleepStart {
+                bedtime: NaiveTime::from_hms_opt(22, 30, 0).unwrap(),
+                recorded_at: stale,
+            }),
+        };
+        state::save(dir.path(), &s).unwrap();
+
+        let err = cmd_sleep_end(Some("06:15"), &cfg).unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("No pending sleep-start"), "got: {msg}");
+        assert!(msg.contains("stale"), "expected stale suffix, got: {msg}");
+
+        // State should be cleared
+        let after = state::load(dir.path());
+        assert!(after.sleep_start.is_none());
+    }
+
+    #[test]
+    fn sleep_end_creates_today_note_from_template() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let cfg = config_in(dir.path(), "24h");
+        cmd_sleep_start(Some("22:30"), &cfg).unwrap();
+        cmd_sleep_end(Some("06:15"), &cfg).unwrap();
+
+        let today = Local::now().format("%Y-%m-%d").to_string();
+        let path = dir.path().join(format!("{today}.md"));
+        assert!(path.exists(), "today's note should be created");
+        let note = std::fs::read_to_string(&path).unwrap();
+        assert!(note.starts_with("---\n"), "should have frontmatter");
+    }
+
+    #[test]
+    fn sleep_end_rejects_invalid_time() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let cfg = config_in(dir.path(), "24h");
+        cmd_sleep_start(Some("22:30"), &cfg).unwrap();
+        let err = cmd_sleep_end(Some("banana"), &cfg).unwrap_err();
         assert!(err.to_string().contains("Invalid time"));
     }
 }
