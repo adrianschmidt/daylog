@@ -28,6 +28,32 @@ fn rating_color(value: i32) -> Color {
     }
 }
 
+/// Format the sleep-line text for the dashboard.
+///
+/// `sleep_start` / `sleep_end` are canonical 24h `HH:MM` as written by
+/// the materializer (Task 5). They get reformatted per `fmt`. If parsing
+/// fails (DB corruption), falls back to the raw `start-end` string.
+/// Returns `None` if any of start/end/hours is missing.
+fn format_sleep_line(
+    sleep_start: Option<&str>,
+    sleep_end: Option<&str>,
+    sleep_hours: Option<f64>,
+    sleep_quality: Option<i32>,
+    fmt: crate::config::TimeFormat,
+) -> Option<String> {
+    let start = sleep_start?;
+    let end = sleep_end?;
+    let hours = sleep_hours?;
+    let range = match (crate::time::parse_time(start), crate::time::parse_time(end)) {
+        (Some(s), Some(e)) => crate::time::format_sleep_range(s, e, fmt),
+        _ => format!("{start}-{end}"),
+    };
+    let quality_str = sleep_quality
+        .map(|q| format!("  quality: {q}/5"))
+        .unwrap_or_default();
+    Some(format!("{range}  ({hours:.1}h){quality_str}"))
+}
+
 impl Module for Dashboard {
     fn id(&self) -> &str {
         "dashboard"
@@ -92,22 +118,21 @@ impl Module for Dashboard {
                 lines.push(Line::from(""));
 
                 // Sleep
-                let sleep_line = match (&sleep_start, &sleep_end, sleep_hours) {
-                    (Some(start), Some(end), Some(hours)) => {
-                        let quality_str = sleep_quality
-                            .map(|q| format!("  quality: {q}/5"))
-                            .unwrap_or_default();
-                        vec![
-                            Span::styled("Sleep: ", Style::default().fg(Color::Blue)),
-                            Span::raw(format!("{start}-{end}  ({hours:.1}h){quality_str}")),
-                        ]
-                    }
-                    _ => {
-                        vec![
-                            Span::styled("Sleep: ", Style::default().fg(Color::Blue)),
-                            Span::styled("--", Style::default().fg(Color::DarkGray)),
-                        ]
-                    }
+                let sleep_line = match format_sleep_line(
+                    sleep_start.as_deref(),
+                    sleep_end.as_deref(),
+                    sleep_hours,
+                    sleep_quality,
+                    config.time_format,
+                ) {
+                    Some(text) => vec![
+                        Span::styled("Sleep: ", Style::default().fg(Color::Blue)),
+                        Span::raw(text),
+                    ],
+                    None => vec![
+                        Span::styled("Sleep: ", Style::default().fg(Color::Blue)),
+                        Span::styled("--", Style::default().fg(Color::DarkGray)),
+                    ],
                 };
                 lines.push(Line::from(sleep_line));
 
@@ -203,5 +228,62 @@ impl Module for Dashboard {
     fn status_json(&self, conn: &Connection, config: &Config) -> Option<serde_json::Value> {
         let today = config.effective_today();
         crate::db::load_today(conn, &today).ok().flatten()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn sleep_line_12h_from_canonical_db() {
+        let s = format_sleep_line(
+            Some("22:30"),
+            Some("06:15"),
+            Some(7.75),
+            None,
+            crate::config::TimeFormat::TwelveHour,
+        )
+        .unwrap();
+        assert!(s.contains("10:30pm-6:15am"), "got: {s}");
+        assert!(s.contains("(7.8h)"), "got: {s}");
+    }
+
+    #[test]
+    fn sleep_line_24h_from_canonical_db() {
+        let s = format_sleep_line(
+            Some("22:30"),
+            Some("06:15"),
+            Some(7.75),
+            None,
+            crate::config::TimeFormat::TwentyFourHour,
+        )
+        .unwrap();
+        assert!(s.contains("22:30-06:15"), "got: {s}");
+    }
+
+    #[test]
+    fn sleep_line_with_quality() {
+        let s = format_sleep_line(
+            Some("22:30"),
+            Some("06:15"),
+            Some(7.75),
+            Some(4),
+            crate::config::TimeFormat::TwelveHour,
+        )
+        .unwrap();
+        assert!(s.contains("quality: 4/5"), "got: {s}");
+    }
+
+    #[test]
+    fn sleep_line_missing_returns_none() {
+        let s = format_sleep_line(
+            None,
+            None,
+            None,
+            None,
+            crate::config::TimeFormat::TwelveHour,
+        );
+        assert!(s.is_none());
     }
 }

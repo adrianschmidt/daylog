@@ -5,6 +5,9 @@ notes_dir = "~/daylog-notes"
                        # E.g., 4 means anything before 4 AM counts as yesterday.
 # weight_unit = "lbs"  # or "kg". The DB stores raw numbers without unit info,
                        # so changing this mid-use makes historical values ambiguous.
+# time_format = "12h"  # or "24h". Controls how times are written to markdown
+                       # files and shown in the dashboard. The DB always
+                       # stores canonical 24h "HH:MM".
 
 [modules]
 dashboard = true
