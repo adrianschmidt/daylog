@@ -1,25 +1,24 @@
 use chrono::{Local, Timelike};
 use color_eyre::eyre::Result;
+use color_eyre::Help;
 
 use crate::config::Config;
 use crate::state::{self, PendingSleepStart};
 use crate::time;
 
-/// Records bedtime as pending state for later finalization by `sleep-end`.
 pub fn cmd_sleep_start(time_arg: Option<&str>, config: &Config) -> Result<()> {
+    let now = Local::now();
     let bedtime = match time_arg {
-        Some(s) => time::parse_time(s).ok_or_else(|| {
-            color_eyre::eyre::eyre!(
-                "Invalid time: '{s}'. Expected HH:MM (24h) or H:MMam/pm (12h)."
-            )
-        })?,
-        None => Local::now()
-            .time()
-            .with_second(0)
-            .unwrap_or_else(|| Local::now().time()),
+        Some(s) => time::parse_time(s)
+            .ok_or_else(|| {
+                color_eyre::eyre::eyre!(
+                    "Invalid time: '{s}'. Expected HH:MM (24h) or H:MMam/pm (12h)."
+                )
+            })
+            .suggestion("Use 24h form like 22:30 or 12h form like 10:30pm.")?,
+        None => now.time().with_second(0).expect("0 < 60"),
     };
 
-    let now = Local::now();
     let mut s = state::load(&config.notes_dir_path());
     s.sleep_start = Some(PendingSleepStart {
         bedtime,
