@@ -80,6 +80,39 @@ pub fn parse_time(s: &str) -> Option<NaiveTime> {
     NaiveTime::from_hms_opt(hour_24, minute, 0)
 }
 
+/// Parse a `start-end` sleep range. Surrounding quotes and whitespace
+/// around the dash are tolerated.
+pub fn parse_sleep_range(s: &str) -> Option<(NaiveTime, NaiveTime)> {
+    let s = s.trim().trim_matches('"').trim_matches('\'');
+    let (start, end) = s.split_once('-')?;
+    let start = parse_time(start)?;
+    let end = parse_time(end)?;
+    Some((start, end))
+}
+
+/// Format a sleep range as `"start-end"` per the given config format.
+pub fn format_sleep_range(start: NaiveTime, end: NaiveTime, fmt: TimeFormat) -> String {
+    format!("{}-{}", format_time(start, fmt), format_time(end, fmt))
+}
+
+/// Compute hours between two times. If end <= start, treats it as
+/// crossing midnight (adds 24h). Equal times return 0.0.
+/// Result is rounded to 2 decimal places.
+pub fn sleep_hours(start: NaiveTime, end: NaiveTime) -> f64 {
+    use chrono::Timelike;
+    let start_min = (start.hour() * 60 + start.minute()) as i32;
+    let end_min = (end.hour() * 60 + end.minute()) as i32;
+    let duration = if end_min == start_min {
+        0
+    } else if end_min < start_min {
+        (1440 - start_min) + end_min
+    } else {
+        end_min - start_min
+    };
+    let hours = duration as f64 / 60.0;
+    (hours * 100.0).round() / 100.0
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -167,5 +200,71 @@ mod tests {
                 }
             }
         }
+    }
+
+    #[test]
+    fn parse_sleep_range_12h() {
+        let (s, e) = parse_sleep_range("10:30pm-6:15am").unwrap();
+        assert_eq!(s, NaiveTime::from_hms_opt(22, 30, 0).unwrap());
+        assert_eq!(e, NaiveTime::from_hms_opt(6, 15, 0).unwrap());
+    }
+
+    #[test]
+    fn parse_sleep_range_24h() {
+        let (s, e) = parse_sleep_range("22:30-06:15").unwrap();
+        assert_eq!(s, NaiveTime::from_hms_opt(22, 30, 0).unwrap());
+        assert_eq!(e, NaiveTime::from_hms_opt(6, 15, 0).unwrap());
+    }
+
+    #[test]
+    fn parse_sleep_range_quoted_and_spaces() {
+        let (s, e) = parse_sleep_range("\"10:30pm - 6:15am\"").unwrap();
+        assert_eq!(s, NaiveTime::from_hms_opt(22, 30, 0).unwrap());
+        assert_eq!(e, NaiveTime::from_hms_opt(6, 15, 0).unwrap());
+    }
+
+    #[test]
+    fn parse_sleep_range_no_dash() {
+        assert!(parse_sleep_range("22:30").is_none());
+    }
+
+    #[test]
+    fn parse_sleep_range_garbage() {
+        assert!(parse_sleep_range("foo-bar").is_none());
+        assert!(parse_sleep_range("").is_none());
+    }
+
+    #[test]
+    fn format_sleep_range_uses_format() {
+        let s = NaiveTime::from_hms_opt(22, 30, 0).unwrap();
+        let e = NaiveTime::from_hms_opt(6, 15, 0).unwrap();
+        assert_eq!(
+            format_sleep_range(s, e, TimeFormat::TwelveHour),
+            "10:30pm-6:15am"
+        );
+        assert_eq!(
+            format_sleep_range(s, e, TimeFormat::TwentyFourHour),
+            "22:30-06:15"
+        );
+    }
+
+    #[test]
+    fn sleep_hours_overnight() {
+        let s = NaiveTime::from_hms_opt(22, 30, 0).unwrap();
+        let e = NaiveTime::from_hms_opt(6, 15, 0).unwrap();
+        assert!((sleep_hours(s, e) - 7.75).abs() < 0.01);
+    }
+
+    #[test]
+    fn sleep_hours_same_day() {
+        let s = NaiveTime::from_hms_opt(0, 28, 0).unwrap();
+        let e = NaiveTime::from_hms_opt(6, 52, 0).unwrap();
+        assert!((sleep_hours(s, e) - 6.4).abs() < 0.01);
+    }
+
+    #[test]
+    fn sleep_hours_equal_returns_zero() {
+        let s = NaiveTime::from_hms_opt(7, 0, 0).unwrap();
+        assert_eq!(sleep_hours(s, s), 0.0);
     }
 }
