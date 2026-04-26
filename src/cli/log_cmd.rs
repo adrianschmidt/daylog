@@ -68,9 +68,10 @@ fn validate_core_field(field: &str, value: &str, config: &Config) -> Result<()> 
                 bail!("Invalid {field}: {n}. Expected 1-5");
             }
         }
-        // sleep value must contain a dash separating start-end times
-        "sleep" if !value.contains('-') => {
-            bail!("Invalid sleep format: '{value}'. Expected start-end (e.g., 10:30pm-6:15am)");
+        "sleep" => {
+            if crate::time::parse_sleep_range(value).is_none() {
+                bail!("Invalid sleep: '{value}'. Expected start-end (e.g., 10:30pm-6:15am or 22:30-06:15)");
+            }
         }
         _ => {}
     }
@@ -94,10 +95,13 @@ fn route_field(
         }
         "sleep" => {
             validate_core_field("sleep", joined, config)?;
+            let (start, end) = crate::time::parse_sleep_range(joined)
+                .expect("validated above");
+            let formatted = crate::time::format_sleep_range(start, end, config.time_format);
             return Ok(frontmatter::set_scalar(
                 content,
                 "sleep",
-                &format!("\"{}\"", joined),
+                &format!("\"{}\"", formatted),
             ));
         }
         "mood" => {
@@ -198,7 +202,11 @@ Good session.
         let value = vec!["11pm-7am".to_string()];
         let result =
             route_field("sleep", &value, "11pm-7am", SAMPLE, &cfg, &empty_modules()).unwrap();
-        assert!(result.contains("sleep: \"11pm-7am\""));
+        // 12h config preserves the 12h form (canonicalized to "11:00pm-7:00am")
+        assert!(
+            result.contains("sleep: \"11:00pm-7:00am\""),
+            "got: {result}"
+        );
     }
 
     #[test]
@@ -333,7 +341,7 @@ Good session.
         assert!(result
             .unwrap_err()
             .to_string()
-            .contains("Expected start-end"));
+            .contains("Invalid sleep"));
     }
 
     #[test]
@@ -382,6 +390,50 @@ Good session.
             .unwrap_err()
             .to_string()
             .contains("Expected a number"));
+    }
+
+    #[test]
+    fn route_sleep_normalizes_12h_input_with_24h_config() {
+        let mut cfg = default_config();
+        cfg.time_format = crate::config::TimeFormat::TwentyFourHour;
+        let value = vec!["10:30pm-6:15am".to_string()];
+        let result =
+            route_field("sleep", &value, "10:30pm-6:15am", SAMPLE, &cfg, &empty_modules())
+                .unwrap();
+        assert!(
+            result.contains("sleep: \"22:30-06:15\""),
+            "expected 24h normalized, got: {result}"
+        );
+    }
+
+    #[test]
+    fn route_sleep_keeps_12h_with_12h_config() {
+        let cfg = default_config(); // default is 12h
+        let value = vec!["22:30-06:15".to_string()];
+        let result =
+            route_field("sleep", &value, "22:30-06:15", SAMPLE, &cfg, &empty_modules()).unwrap();
+        assert!(
+            result.contains("sleep: \"10:30pm-6:15am\""),
+            "expected 12h normalized, got: {result}"
+        );
+    }
+
+    #[test]
+    fn route_sleep_rejects_unparseable() {
+        let cfg = default_config();
+        let result = route_field(
+            "sleep",
+            &["banana-foo".into()],
+            "banana-foo",
+            SAMPLE,
+            &cfg,
+            &empty_modules(),
+        );
+        assert!(result.is_err());
+        assert!(result
+            .unwrap_err()
+            .to_string()
+            .contains("Invalid sleep"));
     }
 
     #[test]
