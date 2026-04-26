@@ -1,5 +1,6 @@
 pub mod completions;
 pub mod log_cmd;
+pub mod sleep_cmd;
 
 use clap::{Parser, Subcommand};
 use clap_complete::Shell;
