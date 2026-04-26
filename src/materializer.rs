@@ -121,83 +121,6 @@ fn auto_quote_colons(line: &str) -> String {
     format!("{key_part}: \"{value}\"")
 }
 
-// --- Sleep Time Parsing ---
-
-/// Parse a sleep range like "10:30pm-6:15am" into (start, end, hours).
-pub fn parse_sleep(raw: &str) -> Option<(String, String, f64)> {
-    let raw = raw.trim().trim_matches('"').trim_matches('\'');
-
-    // Split on `-` but handle negative times carefully
-    let parts: Vec<&str> = raw.splitn(2, '-').collect();
-    if parts.len() != 2 {
-        return None;
-    }
-
-    let start_str = parts[0].trim();
-    let end_str = parts[1].trim();
-
-    let start_minutes = parse_time_to_minutes(start_str, true)?;
-    let end_minutes = parse_time_to_minutes(end_str, false)?;
-
-    // Calculate hours (handle overnight)
-    let duration_minutes = if end_minutes <= start_minutes {
-        (1440 - start_minutes) + end_minutes
-    } else {
-        end_minutes - start_minutes
-    };
-
-    let hours = duration_minutes as f64 / 60.0;
-    // Round to 2 decimal places
-    let hours = (hours * 100.0).round() / 100.0;
-
-    Some((start_str.to_string(), end_str.to_string(), hours))
-}
-
-/// Parse a time string to minutes since midnight.
-/// `is_bedtime` is used to infer am/pm when not specified.
-fn parse_time_to_minutes(time: &str, is_bedtime: bool) -> Option<i32> {
-    let time = time.trim().to_lowercase();
-
-    let is_pm = time.contains("pm");
-    let is_am = time.contains("am");
-    let clean = time.replace("pm", "").replace("am", "").trim().to_string();
-
-    let parts: Vec<&str> = clean.split(':').collect();
-    let hour: i32 = parts.first()?.parse().ok()?;
-    let minute: i32 = if parts.len() > 1 {
-        parts[1].parse().ok()?
-    } else {
-        0
-    };
-
-    let hour_24 = if is_pm {
-        if hour == 12 {
-            12
-        } else {
-            hour + 12
-        }
-    } else if is_am {
-        if hour == 12 {
-            0
-        } else {
-            hour
-        }
-    } else {
-        // Infer: bedtime hours 7-11 are PM, wake hours 1-8 are AM
-        if is_bedtime {
-            if (7..12).contains(&hour) {
-                hour + 12
-            } else {
-                hour
-            }
-        } else {
-            hour // assume literal for wake times without am/pm
-        }
-    };
-
-    Some(hour_24 * 60 + minute)
-}
-
 // --- Core Normalization ---
 
 /// Parse and normalize a single note file, inserting into the database.
@@ -242,7 +165,17 @@ pub fn materialize_file(
         .as_secs_f64();
 
     // Core vitals extraction
-    let sleep_data = yaml_str_field(yaml, "sleep").and_then(|s| parse_sleep(&s));
+    let sleep_data = yaml_str_field(yaml, "sleep")
+        .as_deref()
+        .and_then(crate::time::parse_sleep_range)
+        .map(|(start, end)| {
+            let hours = crate::time::sleep_hours(start, end);
+            (
+                crate::time::format_time(start, crate::config::TimeFormat::TwentyFourHour),
+                crate::time::format_time(end, crate::config::TimeFormat::TwentyFourHour),
+                hours,
+            )
+        });
     let weight = yaml_f64_field(yaml, "weight");
     let mood = yaml_i32_field(yaml, "mood");
     let energy = yaml_i32_field(yaml, "energy");
@@ -669,41 +602,6 @@ mod tests {
         assert!(!result.contains("\"185x5\""));
     }
 
-    // --- Sleep parsing tests ---
-
-    #[test]
-    fn test_parse_sleep_12hr() {
-        let (start, end, hours) = parse_sleep("10:30pm-6:15am").unwrap();
-        assert_eq!(start, "10:30pm");
-        assert_eq!(end, "6:15am");
-        assert!((hours - 7.75).abs() < 0.01);
-    }
-
-    #[test]
-    fn test_parse_sleep_quoted() {
-        let (_, _, hours) = parse_sleep("\"10:55pm-6:40am\"").unwrap();
-        assert!((hours - 7.75).abs() < 0.01);
-    }
-
-    #[test]
-    fn test_parse_sleep_no_minutes() {
-        let (_, _, hours) = parse_sleep("11pm-7am").unwrap();
-        assert!((hours - 8.0).abs() < 0.01);
-    }
-
-    #[test]
-    fn test_parse_sleep_24hr_implicit() {
-        // Without am/pm markers, infer based on bedtime/wake context
-        let (_, _, hours) = parse_sleep("22:30-6:15").unwrap();
-        assert!((hours - 7.75).abs() < 0.01);
-    }
-
-    #[test]
-    fn test_parse_sleep_midnight_crossover() {
-        let (_, _, hours) = parse_sleep("11:45pm-5:45am").unwrap();
-        assert!((hours - 6.0).abs() < 0.01);
-    }
-
     // --- Frontmatter extraction tests ---
 
     #[test]
@@ -803,8 +701,8 @@ mod tests {
         assert_eq!(today["weight"], 173.4);
         assert_eq!(today["mood"], 4);
         assert_eq!(today["energy"], 3);
-        assert_eq!(today["sleep_start"], "10:30pm");
-        assert_eq!(today["sleep_end"], "6:15am");
+        assert_eq!(today["sleep_start"], "22:30");
+        assert_eq!(today["sleep_end"], "06:15");
         assert!((today["sleep_hours"].as_f64().unwrap() - 7.75).abs() < 0.01);
         assert_eq!(today["notes"], "Great day.");
 
@@ -813,5 +711,92 @@ mod tests {
         assert_eq!(metrics.len(), 1);
         assert_eq!(metrics[0].0, "resting_hr");
         assert_eq!(metrics[0].1, 52.0);
+    }
+
+    #[test]
+    fn materialize_normalizes_12h_sleep_to_24h() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let notes_dir = dir.path();
+        let db_path = notes_dir.join(".daylog.db");
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE days (
+                 date TEXT PRIMARY KEY, sleep_start TEXT, sleep_end TEXT,
+                 sleep_hours REAL, sleep_quality INTEGER, mood INTEGER,
+                 energy INTEGER, weight REAL, notes TEXT,
+                 file_mtime REAL, parsed_at TEXT);
+             CREATE TABLE metrics (
+                 date TEXT, name TEXT, value REAL,
+                 PRIMARY KEY (date, name));",
+        )
+        .unwrap();
+
+        let file = notes_dir.join("2026-04-26.md");
+        std::fs::write(
+            &file,
+            "---\ndate: 2026-04-26\nsleep: \"10:30pm-6:15am\"\n---\n",
+        )
+        .unwrap();
+
+        let cfg: Config = toml::from_str(&format!(
+            "notes_dir = '{}'\n",
+            notes_dir.display().to_string().replace('\\', "/")
+        ))
+        .unwrap();
+        materialize_file(&conn, &file, &cfg, &[]).unwrap();
+
+        let (start, end, hours): (String, String, f64) = conn
+            .query_row(
+                "SELECT sleep_start, sleep_end, sleep_hours FROM days WHERE date = ?1",
+                ["2026-04-26"],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(start, "22:30");
+        assert_eq!(end, "06:15");
+        assert!((hours - 7.75).abs() < 0.01);
+    }
+
+    #[test]
+    fn materialize_normalizes_24h_sleep_to_24h() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let notes_dir = dir.path();
+        let db_path = notes_dir.join(".daylog.db");
+        let conn = rusqlite::Connection::open(&db_path).unwrap();
+        conn.execute_batch(
+            "CREATE TABLE days (
+                 date TEXT PRIMARY KEY, sleep_start TEXT, sleep_end TEXT,
+                 sleep_hours REAL, sleep_quality INTEGER, mood INTEGER,
+                 energy INTEGER, weight REAL, notes TEXT,
+                 file_mtime REAL, parsed_at TEXT);
+             CREATE TABLE metrics (
+                 date TEXT, name TEXT, value REAL,
+                 PRIMARY KEY (date, name));",
+        )
+        .unwrap();
+
+        let file = notes_dir.join("2026-04-26.md");
+        std::fs::write(
+            &file,
+            "---\ndate: 2026-04-26\nsleep: \"22:30-06:15\"\n---\n",
+        )
+        .unwrap();
+
+        let cfg: Config = toml::from_str(&format!(
+            "notes_dir = '{}'\n",
+            notes_dir.display().to_string().replace('\\', "/")
+        ))
+        .unwrap();
+        materialize_file(&conn, &file, &cfg, &[]).unwrap();
+
+        let (start, end): (String, String) = conn
+            .query_row(
+                "SELECT sleep_start, sleep_end FROM days WHERE date = ?1",
+                ["2026-04-26"],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(start, "22:30");
+        assert_eq!(end, "06:15");
     }
 }
