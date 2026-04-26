@@ -23,6 +23,24 @@ impl fmt::Display for WeightUnit {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
+pub enum TimeFormat {
+    #[default]
+    #[serde(rename = "12h")]
+    TwelveHour,
+    #[serde(rename = "24h")]
+    TwentyFourHour,
+}
+
+impl fmt::Display for TimeFormat {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            TimeFormat::TwelveHour => write!(f, "12h"),
+            TimeFormat::TwentyFourHour => write!(f, "24h"),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct Config {
     pub notes_dir: String,
@@ -37,6 +55,8 @@ pub struct Config {
     /// (no automatic conversion is performed).
     #[serde(default)]
     pub weight_unit: WeightUnit,
+    #[serde(default)]
+    pub time_format: TimeFormat,
     #[serde(default)]
     pub modules: ModulesConfig,
     #[serde(default)]
@@ -110,6 +130,8 @@ impl Config {
             let err = color_eyre::eyre::eyre!("Failed to parse config at {}: {e}", path.display());
             if e.message().contains("weight_unit") {
                 err.suggestion("weight_unit must be \"kg\" or \"lbs\" (default: \"lbs\").")
+            } else if e.message().contains("time_format") {
+                err.suggestion("time_format must be \"12h\" or \"24h\" (default: \"12h\").")
             } else {
                 err
             }
@@ -412,5 +434,38 @@ mod tests {
     fn test_weight_unit_display() {
         assert_eq!(WeightUnit::Lbs.to_string(), "lbs");
         assert_eq!(WeightUnit::Kg.to_string(), "kg");
+    }
+
+    #[test]
+    fn test_time_format_defaults_to_12h() {
+        let config: Config = toml::from_str("notes_dir = '/tmp/test'\n").unwrap();
+        assert_eq!(config.time_format, TimeFormat::TwelveHour);
+    }
+
+    #[test]
+    fn test_time_format_24h() {
+        let config: Config =
+            toml::from_str("notes_dir = '/tmp/test'\ntime_format = '24h'\n").unwrap();
+        assert_eq!(config.time_format, TimeFormat::TwentyFourHour);
+    }
+
+    #[test]
+    fn test_time_format_12h_explicit() {
+        let config: Config =
+            toml::from_str("notes_dir = '/tmp/test'\ntime_format = '12h'\n").unwrap();
+        assert_eq!(config.time_format, TimeFormat::TwelveHour);
+    }
+
+    #[test]
+    fn test_time_format_invalid() {
+        let result: std::result::Result<Config, _> =
+            toml::from_str("notes_dir = '/tmp/test'\ntime_format = 'military'\n");
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_time_format_display() {
+        assert_eq!(TimeFormat::TwelveHour.to_string(), "12h");
+        assert_eq!(TimeFormat::TwentyFourHour.to_string(), "24h");
     }
 }
