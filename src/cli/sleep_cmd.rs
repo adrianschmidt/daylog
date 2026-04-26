@@ -83,11 +83,7 @@ pub fn cmd_sleep_end(time_arg: Option<&str>, config: &Config) -> Result<()> {
     } else {
         crate::template::render_daily_note(&wake_date.format("%Y-%m-%d").to_string(), config)
     };
-    let updated = crate::frontmatter::set_scalar(
-        &content,
-        "sleep",
-        &format!("\"{}\"", formatted),
-    );
+    let updated = crate::frontmatter::set_scalar(&content, "sleep", &format!("\"{}\"", formatted));
     crate::frontmatter::atomic_write(&note_path, &updated)?;
 
     state::save(&notes_dir, &state)?;

@@ -91,8 +91,8 @@ fn test_full_roundtrip() {
     assert_eq!(day["weight"], 173.4);
     assert_eq!(day["mood"], 4);
     assert_eq!(day["energy"], 3);
-    assert_eq!(day["sleep_start"], "10:30pm");
-    assert_eq!(day["sleep_end"], "6:15am");
+    assert_eq!(day["sleep_start"], "22:30");
+    assert_eq!(day["sleep_end"], "06:15");
     assert!((day["sleep_hours"].as_f64().unwrap() - 7.75).abs() < 0.01);
 
     // 5. Verify metrics

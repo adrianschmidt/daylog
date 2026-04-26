@@ -95,8 +95,7 @@ fn route_field(
         }
         "sleep" => {
             validate_core_field("sleep", joined, config)?;
-            let (start, end) = crate::time::parse_sleep_range(joined)
-                .expect("validated above");
+            let (start, end) = crate::time::parse_sleep_range(joined).expect("validated above");
             let formatted = crate::time::format_sleep_range(start, end, config.time_format);
             return Ok(frontmatter::set_scalar(
                 content,
@@ -338,10 +337,7 @@ Good session.
             &empty_modules(),
         );
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Invalid sleep"));
+        assert!(result.unwrap_err().to_string().contains("Invalid sleep"));
     }
 
     #[test]
@@ -397,9 +393,15 @@ Good session.
         let mut cfg = default_config();
         cfg.time_format = crate::config::TimeFormat::TwentyFourHour;
         let value = vec!["10:30pm-6:15am".to_string()];
-        let result =
-            route_field("sleep", &value, "10:30pm-6:15am", SAMPLE, &cfg, &empty_modules())
-                .unwrap();
+        let result = route_field(
+            "sleep",
+            &value,
+            "10:30pm-6:15am",
+            SAMPLE,
+            &cfg,
+            &empty_modules(),
+        )
+        .unwrap();
         assert!(
             result.contains("sleep: \"22:30-06:15\""),
             "expected 24h normalized, got: {result}"
@@ -410,8 +412,15 @@ Good session.
     fn route_sleep_keeps_12h_with_12h_config() {
         let cfg = default_config(); // default is 12h
         let value = vec!["22:30-06:15".to_string()];
-        let result =
-            route_field("sleep", &value, "22:30-06:15", SAMPLE, &cfg, &empty_modules()).unwrap();
+        let result = route_field(
+            "sleep",
+            &value,
+            "22:30-06:15",
+            SAMPLE,
+            &cfg,
+            &empty_modules(),
+        )
+        .unwrap();
         assert!(
             result.contains("sleep: \"10:30pm-6:15am\""),
             "expected 12h normalized, got: {result}"
@@ -430,10 +439,7 @@ Good session.
             &empty_modules(),
         );
         assert!(result.is_err());
-        assert!(result
-            .unwrap_err()
-            .to_string()
-            .contains("Invalid sleep"));
+        assert!(result.unwrap_err().to_string().contains("Invalid sleep"));
     }
 
     #[test]

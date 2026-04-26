@@ -51,4 +51,14 @@ pub enum Commands {
         /// Shell to generate completions for
         shell: Shell,
     },
+    /// Record bedtime (uses now, or pass a time)
+    SleepStart {
+        /// Bedtime in HH:MM (24h) or H:MMam/pm (12h)
+        time: Option<String>,
+    },
+    /// Finalize sleep entry on today's note (uses now, or pass a wake time)
+    SleepEnd {
+        /// Wake time in HH:MM (24h) or H:MMam/pm (12h)
+        time: Option<String>,
+    },
 }
