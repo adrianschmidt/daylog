@@ -68,10 +68,8 @@ fn validate_core_field(field: &str, value: &str, config: &Config) -> Result<()> 
                 bail!("Invalid {field}: {n}. Expected 1-5");
             }
         }
-        "sleep" => {
-            if crate::time::parse_sleep_range(value).is_none() {
-                bail!("Invalid sleep: '{value}'. Expected start-end (e.g., 10:30pm-6:15am or 22:30-06:15)");
-            }
+        "sleep" if crate::time::parse_sleep_range(value).is_none() => {
+            bail!("Invalid sleep: '{value}'. Expected start-end (e.g., 10:30pm-6:15am or 22:30-06:15)");
         }
         _ => {}
     }
