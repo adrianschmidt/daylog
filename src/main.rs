@@ -169,6 +169,18 @@ fn cmd_status() -> Result<()> {
         }
     }
 
+    // Surface pending sleep state so scripts and `--json` consumers can see
+    // a sleep-in-progress (between `daylog sleep-start` and `daylog sleep-end`).
+    let pending = daylog::state::load(&config.notes_dir_path());
+    if let Some(p) = pending.sleep_start {
+        output["pending"] = serde_json::json!({
+            "sleep_start": {
+                "bedtime": daylog::time::format_time(p.bedtime, config.time_format),
+                "recorded_at": p.recorded_at.to_rfc3339(),
+            }
+        });
+    }
+
     println!("{}", serde_json::to_string_pretty(&output)?);
     Ok(())
 }

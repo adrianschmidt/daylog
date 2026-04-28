@@ -1,3 +1,4 @@
+use chrono::NaiveTime;
 use color_eyre::eyre::{bail, Result};
 
 use crate::config::Config;
@@ -46,6 +47,30 @@ pub fn execute(
     Ok(())
 }
 
+/// Apply a parsed sleep range to the daily note for `date_str` (a `YYYY-MM-DD`
+/// string). Reads the existing note or renders the template, sets the
+/// `sleep:` scalar via `format_sleep_range` + `set_scalar`, and atomic-writes
+/// the result. This is the shared write-path used by both `daylog log sleep`
+/// (today's note via `effective_today`) and `daylog sleep-end` (calendar
+/// today, regardless of `day_start_hour`).
+pub(crate) fn write_sleep_for_date(
+    date_str: &str,
+    start: NaiveTime,
+    end: NaiveTime,
+    config: &Config,
+) -> Result<()> {
+    let note_path = config.notes_dir_path().join(format!("{date_str}.md"));
+    let content = if note_path.exists() {
+        std::fs::read_to_string(&note_path)?
+    } else {
+        crate::template::render_daily_note(date_str, config)
+    };
+    let formatted = crate::time::format_sleep_range(start, end, config.time_format);
+    let updated = frontmatter::set_scalar(&content, "sleep", &format!("\"{formatted}\""));
+    frontmatter::atomic_write(&note_path, &updated)?;
+    Ok(())
+}
+
 /// Validate a core field value before writing.
 fn validate_core_field(field: &str, value: &str, config: &Config) -> Result<()> {
     match field {
@@ -68,9 +93,6 @@ fn validate_core_field(field: &str, value: &str, config: &Config) -> Result<()> 
                 bail!("Invalid {field}: {n}. Expected 1-5");
             }
         }
-        "sleep" if crate::time::parse_sleep_range(value).is_none() => {
-            bail!("Invalid sleep: '{value}'. Expected start-end (e.g., 10:30pm-6:15am or 22:30-06:15)");
-        }
         _ => {}
     }
     Ok(())
@@ -92,13 +114,16 @@ fn route_field(
             return Ok(frontmatter::set_scalar(content, "weight", joined));
         }
         "sleep" => {
-            validate_core_field("sleep", joined, config)?;
-            let (start, end) = crate::time::parse_sleep_range(joined).expect("validated above");
+            let (start, end) = crate::time::parse_sleep_range(joined).ok_or_else(|| {
+                color_eyre::eyre::eyre!(
+                    "Invalid sleep: '{joined}'. Expected start-end (e.g., 10:30pm-6:15am or 22:30-06:15)"
+                )
+            })?;
             let formatted = crate::time::format_sleep_range(start, end, config.time_format);
             return Ok(frontmatter::set_scalar(
                 content,
                 "sleep",
-                &format!("\"{}\"", formatted),
+                &format!("\"{formatted}\""),
             ));
         }
         "mood" => {

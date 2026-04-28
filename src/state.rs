@@ -1,3 +1,34 @@
+//! Pending CLI state stored in `{notes_dir}/.daylog-state.toml`.
+//!
+//! This sidecar holds short-lived state that doesn't belong in the daily
+//! notes themselves — currently only the pending bedtime between
+//! `daylog sleep-start` and `daylog sleep-end`.
+//!
+//! ## Concurrency / crash semantics
+//!
+//! - **Atomicity:** [`save`] writes to a PID-suffixed temp file and renames
+//!   into place, so a crash mid-write cannot leave the sidecar partially
+//!   written. The temp filename includes [`std::process::id`] so concurrent
+//!   processes don't collide on the temp path.
+//! - **No advisory locking.** Two `daylog` processes performing
+//!   read-modify-write on the sidecar can race: P1 reads, P2 reads, P1
+//!   saves, P2 saves — P2 wins. For two `sleep-start` invocations this is
+//!   the intended "last bedtime wins" semantic. For mixed `sleep-start` /
+//!   `sleep-end` interleavings the outcome is best-effort.
+//! - **Sleep-end ordering:** `cmd_sleep_end` writes the markdown note
+//!   atomically *first*, then clears the sidecar. A crash between those
+//!   two steps leaves the note written and the sidecar still pointing at
+//!   the now-consumed bedtime, so the next `sleep-end` would treat it as
+//!   live. The sidecar clear is therefore best-effort — a stale entry is
+//!   bounded by the 24h staleness guard in `cmd_sleep_end`.
+//! - **Corrupt sidecar:** [`load`] degrades to an empty state with a
+//!   warning rather than failing, since blocking sleep logging on a
+//!   corrupted sidecar would be worse UX than losing the in-flight bedtime.
+//! - **Co-located with the DB by design:** the sidecar lives next to
+//!   `.daylog.db` in `notes_dir`. This means sleep state is per-notes-dir,
+//!   matching the data model. Users syncing `notes_dir` across machines
+//!   should add `.daylog-state.toml` to their ignore list.
+
 use chrono::{DateTime, Local, NaiveTime};
 use color_eyre::eyre::{Result, WrapErr};
 use serde::{Deserialize, Serialize};
@@ -39,7 +70,8 @@ pub fn load(notes_dir: &Path) -> PendingState {
         Ok(s) => s,
         Err(e) => {
             eprintln!(
-                "Warning: {} is malformed ({e}), treating as empty.",
+                "Warning: {} is malformed ({e}), treating as empty. \
+                 Delete the file or fix the TOML by hand to restore pending state.",
                 path.display()
             );
             PendingState::default()

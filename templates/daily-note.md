@@ -1,6 +1,6 @@
 ---
 date: DATE_PLACEHOLDER
-sleep:                    # e.g., 10:30pm-6:15am
+sleep:                    # e.g., SLEEP_EXAMPLE_PLACEHOLDER
 sleep_quality:            # 1-5
 mood:                     # 1-5
 energy:                   # 1-5

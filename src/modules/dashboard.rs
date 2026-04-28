@@ -54,6 +54,20 @@ fn format_sleep_line(
     Some(format!("{range}  ({hours:.1}h){quality_str}"))
 }
 
+/// Format the in-progress sleep-line ("Sleep: in progress (since 10:30pm)")
+/// shown when a `daylog sleep-start` has been recorded but `sleep-end` has
+/// not. Returns `None` if there is no pending bedtime.
+fn format_pending_sleep_line(
+    pending: Option<&crate::state::PendingSleepStart>,
+    fmt: crate::config::TimeFormat,
+) -> Option<String> {
+    let p = pending?;
+    Some(format!(
+        "in progress (since {})",
+        crate::time::format_time(p.bedtime, fmt)
+    ))
+}
+
 impl Module for Dashboard {
     fn id(&self) -> &str {
         "dashboard"
@@ -117,22 +131,33 @@ impl Module for Dashboard {
                 )));
                 lines.push(Line::from(""));
 
-                // Sleep
-                let sleep_line = match format_sleep_line(
+                // Sleep — prefer the recorded value; if none, surface a
+                // pending `sleep-start` so the user knows the bedtime is
+                // in flight rather than missing.
+                let recorded = format_sleep_line(
                     sleep_start.as_deref(),
                     sleep_end.as_deref(),
                     sleep_hours,
                     sleep_quality,
                     config.time_format,
-                ) {
-                    Some(text) => vec![
+                );
+                let sleep_line = if let Some(text) = recorded {
+                    vec![
                         Span::styled("Sleep: ", Style::default().fg(Color::Blue)),
                         Span::raw(text),
-                    ],
-                    None => vec![
-                        Span::styled("Sleep: ", Style::default().fg(Color::Blue)),
-                        Span::styled("--", Style::default().fg(Color::DarkGray)),
-                    ],
+                    ]
+                } else {
+                    let pending = crate::state::load(&config.notes_dir_path()).sleep_start;
+                    match format_pending_sleep_line(pending.as_ref(), config.time_format) {
+                        Some(text) => vec![
+                            Span::styled("Sleep: ", Style::default().fg(Color::Blue)),
+                            Span::styled(text, Style::default().fg(Color::Yellow)),
+                        ],
+                        None => vec![
+                            Span::styled("Sleep: ", Style::default().fg(Color::Blue)),
+                            Span::styled("--", Style::default().fg(Color::DarkGray)),
+                        ],
+                    }
                 };
                 lines.push(Line::from(sleep_line));
 
@@ -200,7 +225,7 @@ impl Module for Dashboard {
                 lines
             }
             Err(_) => {
-                vec![
+                let mut lines = vec![
                     Line::from(Span::styled(
                         format!("Today: {today}"),
                         Style::default()
@@ -208,15 +233,27 @@ impl Module for Dashboard {
                             .add_modifier(Modifier::BOLD),
                     )),
                     Line::from(""),
-                    Line::from(Span::styled(
-                        "No data for today",
-                        Style::default().fg(Color::DarkGray),
-                    )),
-                    Line::from(Span::styled(
-                        "Create a note or run `daylog edit`",
-                        Style::default().fg(Color::DarkGray),
-                    )),
-                ]
+                ];
+                // Show an in-progress sleep hint even when the morning's note
+                // doesn't exist yet — the bedtime was recorded last night.
+                let pending = crate::state::load(&config.notes_dir_path()).sleep_start;
+                if let Some(text) = format_pending_sleep_line(pending.as_ref(), config.time_format)
+                {
+                    lines.push(Line::from(vec![
+                        Span::styled("Sleep: ", Style::default().fg(Color::Blue)),
+                        Span::styled(text, Style::default().fg(Color::Yellow)),
+                    ]));
+                    lines.push(Line::from(""));
+                }
+                lines.push(Line::from(Span::styled(
+                    "No data for today",
+                    Style::default().fg(Color::DarkGray),
+                )));
+                lines.push(Line::from(Span::styled(
+                    "Create a note or run `daylog edit`",
+                    Style::default().fg(Color::DarkGray),
+                )));
+                lines
             }
         };
 
@@ -284,6 +321,36 @@ mod tests {
             None,
             crate::config::TimeFormat::TwelveHour,
         );
+        assert!(s.is_none());
+    }
+
+    #[test]
+    fn pending_sleep_line_12h() {
+        use chrono::{Local, NaiveTime};
+        let p = crate::state::PendingSleepStart {
+            bedtime: NaiveTime::from_hms_opt(22, 30, 0).unwrap(),
+            recorded_at: Local::now(),
+        };
+        let s = format_pending_sleep_line(Some(&p), crate::config::TimeFormat::TwelveHour).unwrap();
+        assert!(s.contains("in progress"), "got: {s}");
+        assert!(s.contains("10:30pm"), "got: {s}");
+    }
+
+    #[test]
+    fn pending_sleep_line_24h() {
+        use chrono::{Local, NaiveTime};
+        let p = crate::state::PendingSleepStart {
+            bedtime: NaiveTime::from_hms_opt(22, 30, 0).unwrap(),
+            recorded_at: Local::now(),
+        };
+        let s =
+            format_pending_sleep_line(Some(&p), crate::config::TimeFormat::TwentyFourHour).unwrap();
+        assert!(s.contains("22:30"), "got: {s}");
+    }
+
+    #[test]
+    fn pending_sleep_line_none() {
+        let s = format_pending_sleep_line(None, crate::config::TimeFormat::TwelveHour);
         assert!(s.is_none());
     }
 }
