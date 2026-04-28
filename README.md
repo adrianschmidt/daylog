@@ -80,11 +80,29 @@ daylog log weight 173.4         # Log a value (no quotes needed)
 daylog log lift squat 185x5     # Log a lift
 daylog log sleep 10:30pm-6:15am # Log sleep
 daylog log metric resting_hr 52 # Log a custom metric
+daylog sleep-start              # Record bedtime (uses now, or pass a time)
+daylog sleep-end                # Finalize sleep entry on today's note
 daylog status --json            # Today's data as JSON
 daylog edit                     # Open today's note in $EDITOR
 daylog sync                     # Sync DB without launching TUI
 daylog rebuild                  # Rebuild DB from all notes
 ```
+
+### Sleep across midnight
+
+`daylog sleep-start` and `daylog sleep-end` automate the past-midnight
+date math (sleep is recorded on the file for the day you wake up):
+
+```bash
+daylog sleep-start              # before bed (or: daylog sleep-start 22:30)
+daylog sleep-end                # after waking (or: daylog sleep-end 06:15)
+# → writes `sleep: "10:30pm-6:15am"` to today's note
+```
+
+The pending bedtime lives in a `.daylog-state.toml` sidecar next to the
+database (in `notes_dir`). If you sync `notes_dir` across machines via
+git/Dropbox/iCloud, add `.daylog-state.toml` to your ignore list — the
+sidecar is per-machine state and is not designed for cross-device sync.
 
 ## Tabs
 
@@ -100,6 +118,9 @@ daylog rebuild                  # Rebuild DB from all notes
 ```toml
 notes_dir = "~/daylog-notes"
 # refresh_secs = 15
+# time_format = "12h"  # or "24h" — controls how times are written to
+                      # markdown and rendered in the TUI. The database
+                      # always stores canonical 24h regardless of this.
 
 [modules]
 # dashboard = true
@@ -120,6 +141,13 @@ rdl = { display = "RDL", color = "red" }
 ```
 
 Exercises, metrics, and colors hot-reload without restart. Module enable/disable requires restart.
+
+### Upgrading
+
+After upgrading daylog, run `daylog rebuild` to re-materialize all notes
+into canonical form in the database. New releases occasionally tighten
+parsing or change canonical storage; rebuilding ensures `daylog status
+--json` and the TUI see consistent values across historical days.
 
 ## AI-Native
 

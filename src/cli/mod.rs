@@ -52,11 +52,27 @@ pub enum Commands {
         shell: Shell,
     },
     /// Record bedtime (uses now, or pass a time)
+    ///
+    /// Stores the pending bedtime in `.daylog-state.toml` next to the DB.
+    /// Run `daylog sleep-end` after waking to finalize the entry.
+    ///
+    /// Re-running before `sleep-end` replaces the previous pending bedtime
+    /// (with a stderr notice). A pending bedtime older than 24h is treated
+    /// as stale and discarded by `sleep-end`.
     SleepStart {
         /// Bedtime in HH:MM (24h) or H:MMam/pm (12h)
         time: Option<String>,
     },
     /// Finalize sleep entry on today's note (uses now, or pass a wake time)
+    ///
+    /// Reads the pending bedtime from `daylog sleep-start` and writes
+    /// `sleep: "bedtime-waketime"` to today's note. The wake date is
+    /// always calendar today (the date on the wall clock), independent of
+    /// `day_start_hour` — bedtimes past midnight land on the wake-day's
+    /// note, which is the convention this command exists to enforce.
+    ///
+    /// The written value is rendered per `time_format` from your config
+    /// (`12h` or `24h`); the database always stores canonical 24h.
     SleepEnd {
         /// Wake time in HH:MM (24h) or H:MMam/pm (12h)
         time: Option<String>,

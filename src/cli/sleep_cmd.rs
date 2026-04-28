@@ -1,4 +1,4 @@
-use chrono::{Local, Timelike};
+use chrono::{Local, NaiveTime, Timelike};
 use color_eyre::eyre::Result;
 use color_eyre::Help;
 
@@ -6,21 +6,45 @@ use crate::config::Config;
 use crate::state::{self, PendingSleepStart};
 use crate::time;
 
+const MAX_PENDING_AGE_HOURS: i64 = 24;
+
+/// Parse a CLI time argument, attaching a format-specific suggestion on failure.
+/// `example` is the time used in the suggestion text (e.g., `"22:30"` or `"06:15"`).
+fn parse_time_arg(s: &str, example: &str) -> Result<NaiveTime> {
+    time::parse_time(s)
+        .ok_or_else(|| {
+            color_eyre::eyre::eyre!("Invalid time: '{s}'. Expected HH:MM (24h) or H:MMam/pm (12h).")
+        })
+        .suggestion(format!(
+            "Use 24h form like {example} or 12h form like {}.",
+            example_12h(example)
+        ))
+}
+
+/// Best-effort 12h example for the suggestion text. Falls back to a sensible
+/// default if `example` isn't a clean HH:MM.
+fn example_12h(example: &str) -> String {
+    time::parse_time(example)
+        .map(|t| time::format_time(t, crate::config::TimeFormat::TwelveHour))
+        .unwrap_or_else(|| "10:30pm".to_string())
+}
+
 pub fn cmd_sleep_start(time_arg: Option<&str>, config: &Config) -> Result<()> {
     let now = Local::now();
     let bedtime = match time_arg {
-        Some(s) => time::parse_time(s)
-            .ok_or_else(|| {
-                color_eyre::eyre::eyre!(
-                    "Invalid time: '{s}'. Expected HH:MM (24h) or H:MMam/pm (12h)."
-                )
-            })
-            .suggestion("Use 24h form like 22:30 or 12h form like 10:30pm.")?,
+        Some(s) => parse_time_arg(s, "22:30")?,
         None => now.time().with_second(0).expect("0 < 60"),
     };
 
     let notes_dir = config.notes_dir_path();
     let mut s = state::load(&notes_dir);
+    if let Some(prev) = &s.sleep_start {
+        eprintln!(
+            "Replacing pending sleep-start (was {} from {}).",
+            time::format_time(prev.bedtime, config.time_format),
+            prev.recorded_at.format("%Y-%m-%d %H:%M")
+        );
+    }
     s.sleep_start = Some(PendingSleepStart {
         bedtime,
         recorded_at: now,
@@ -34,18 +58,10 @@ pub fn cmd_sleep_start(time_arg: Option<&str>, config: &Config) -> Result<()> {
     Ok(())
 }
 
-const MAX_PENDING_AGE_HOURS: i64 = 24;
-
 pub fn cmd_sleep_end(time_arg: Option<&str>, config: &Config) -> Result<()> {
     let now = Local::now();
     let wake = match time_arg {
-        Some(s) => time::parse_time(s)
-            .ok_or_else(|| {
-                color_eyre::eyre::eyre!(
-                    "Invalid time: '{s}'. Expected HH:MM (24h) or H:MMam/pm (12h)."
-                )
-            })
-            .suggestion("Use 24h form like 06:15 or 12h form like 6:15am.")?,
+        Some(s) => parse_time_arg(s, "06:15")?,
         None => now.time().with_second(0).expect("0 < 60"),
     };
 
@@ -65,36 +81,31 @@ pub fn cmd_sleep_end(time_arg: Option<&str>, config: &Config) -> Result<()> {
     let age = now.signed_duration_since(pending.recorded_at);
     if age > chrono::Duration::hours(MAX_PENDING_AGE_HOURS) {
         state::save(&notes_dir, &state)?;
+        let stale_bedtime = time::format_time(pending.bedtime, config.time_format);
+        let stale_recorded_at = pending.recorded_at.format("%Y-%m-%d %H:%M");
         return Err(color_eyre::eyre::eyre!(
-            "No pending sleep-start (ignored stale sleep-start from {}).",
-            pending.recorded_at.format("%Y-%m-%d %H:%M")
+            "No pending sleep-start (discarded stale bedtime {stale_bedtime} from {stale_recorded_at})."
         ))
-        .suggestion(
-            "Run `daylog sleep-start` before bed, or use \
-             `daylog log sleep \"HH:MM-HH:MM\"` for a one-shot entry.",
-        );
+        .suggestion(format!(
+            "If you slept that night, recover it with `daylog log sleep \"{stale_bedtime}-HH:MM\"`. \
+             Otherwise run `daylog sleep-start` before bed."
+        ));
     }
 
     let bedtime = pending.bedtime;
+    // Use calendar today, not effective_today_date(): if the user wakes at
+    // 03:00 with day_start_hour=4, the sleep belongs on the wake-day's note
+    // (today on the wall clock), not yesterday's.
     let wake_date = now.date_naive();
-    let formatted = time::format_sleep_range(bedtime, wake, config.time_format);
+    let date_str = wake_date.format("%Y-%m-%d").to_string();
 
-    let note_path = notes_dir.join(format!("{}.md", wake_date.format("%Y-%m-%d")));
-    let content = if note_path.exists() {
-        std::fs::read_to_string(&note_path)?
-    } else {
-        crate::template::render_daily_note(&wake_date.format("%Y-%m-%d").to_string(), config)
-    };
-    let updated = crate::frontmatter::set_scalar(&content, "sleep", &format!("\"{}\"", formatted));
-    crate::frontmatter::atomic_write(&note_path, &updated)?;
+    crate::cli::log_cmd::write_sleep_for_date(&date_str, bedtime, wake, config)?;
 
     state::save(&notes_dir, &state)?;
 
+    let formatted = time::format_sleep_range(bedtime, wake, config.time_format);
     let hours = time::sleep_hours(bedtime, wake);
-    eprintln!(
-        "Sleep recorded: {formatted} ({hours:.2}h) on {}",
-        wake_date.format("%Y-%m-%d")
-    );
+    eprintln!("Sleep recorded: {formatted} ({hours:.2}h) on {date_str}");
     Ok(())
 }
 
@@ -229,6 +240,11 @@ mod tests {
         let msg = err.to_string();
         assert!(msg.contains("No pending sleep-start"), "got: {msg}");
         assert!(msg.contains("stale"), "expected stale suffix, got: {msg}");
+        // The discarded bedtime should be surfaced so the user can recover it.
+        assert!(
+            msg.contains("22:30"),
+            "expected discarded bedtime in message, got: {msg}"
+        );
 
         // State should be cleared
         let after = state::load(dir.path());
