@@ -181,6 +181,12 @@ fn cmd_status() -> Result<()> {
         });
     }
 
+    let nutrition = db::nutrition_status(&conn)?;
+    output["nutrition_db"] = serde_json::json!({
+        "foods_count": nutrition.foods_count,
+        "last_synced": nutrition.last_synced,
+    });
+
     println!("{}", serde_json::to_string_pretty(&output)?);
     Ok(())
 }
