@@ -1,5 +1,6 @@
 use crate::config::Config;
-use color_eyre::eyre::Result;
+use crate::db::{FoodIngredient, FoodInsert, NutrientPanel, TotalPanel};
+use color_eyre::eyre::{eyre, Result};
 use rusqlite::Connection;
 use std::path::Path;
 use std::sync::LazyLock;
@@ -114,9 +115,6 @@ fn finalize(pending: PendingEntry) -> Option<ParsedEntry> {
         line_number: pending.line_number,
     })
 }
-
-use crate::db::{FoodIngredient, FoodInsert, NutrientPanel, TotalPanel};
-use color_eyre::eyre::eyre;
 
 const KNOWN_TOP_LEVEL_KEYS: &[&str] = &[
     "per_100g",
@@ -364,7 +362,7 @@ pub fn materialize_nutrition_db(
     let mut inserted = 0usize;
     let mut seen_names: std::collections::HashSet<String> = std::collections::HashSet::new();
     for fi in &food_inserts {
-        if !seen_names.insert(fi.name.clone()) {
+        if !seen_names.insert(fi.name.to_lowercase()) {
             eprintln!(
                 "Warning: nutrition-db.md duplicate heading '{}' — first occurrence kept",
                 fi.name
