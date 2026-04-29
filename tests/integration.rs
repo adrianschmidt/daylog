@@ -216,3 +216,121 @@ fn test_rebuild_is_idempotent() {
         .unwrap();
     assert_eq!(count, 14, "Should still have exactly 14 days after rebuild");
 }
+
+#[test]
+fn sync_all_includes_nutrition_db() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let notes_dir = dir.path();
+    std::fs::write(
+        notes_dir.join("2026-04-29.md"),
+        "---\ndate: 2026-04-29\nweight: 173.4\n---\n",
+    )
+    .unwrap();
+    std::fs::write(
+        notes_dir.join("nutrition-db.md"),
+        "## Apple\n\n```yaml\nper_100g:\n  kcal: 52\n```\n",
+    )
+    .unwrap();
+
+    let db_path = notes_dir.join(".daylog.db");
+    let config: daylog::config::Config = toml::from_str(&format!(
+        "notes_dir = '{}'\n",
+        notes_dir.display().to_string().replace('\\', "/")
+    ))
+    .unwrap();
+    let registry = daylog::modules::build_registry(&config);
+    let conn = daylog::db::open_rw(&db_path).unwrap();
+    daylog::db::init_db(&conn, &registry).unwrap();
+    daylog::modules::validate_module_tables(&registry).unwrap();
+
+    let (synced, errors) =
+        daylog::materializer::sync_all(&conn, notes_dir, &config, &registry).unwrap();
+    assert_eq!(errors, 0);
+    assert!(synced >= 2, "expected at least 2 synced (1 note + 1 db)");
+
+    let foods_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM foods", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(foods_count, 1);
+}
+
+#[test]
+fn rebuild_reparses_nutrition_unconditionally() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let notes_dir = dir.path();
+    std::fs::write(
+        notes_dir.join("nutrition-db.md"),
+        "## Apple\n\n```yaml\nper_100g:\n  kcal: 52\n```\n",
+    )
+    .unwrap();
+
+    let db_path = notes_dir.join(".daylog.db");
+    let config: daylog::config::Config = toml::from_str(&format!(
+        "notes_dir = '{}'\n",
+        notes_dir.display().to_string().replace('\\', "/")
+    ))
+    .unwrap();
+    let registry = daylog::modules::build_registry(&config);
+    let conn = daylog::db::open_rw(&db_path).unwrap();
+    daylog::db::init_db(&conn, &registry).unwrap();
+    daylog::modules::validate_module_tables(&registry).unwrap();
+
+    daylog::materializer::sync_all(&conn, notes_dir, &config, &registry).unwrap();
+    // Mark sync time in the future so a normal sync_all would skip the file.
+    let future = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs_f64()
+        + 86_400.0;
+    daylog::db::set_last_sync(&conn, future).unwrap();
+    // Tweak the file to simulate an updated value but with stale mtime
+    // is impossible portably; rebuild should run regardless of mtime.
+    std::fs::write(
+        notes_dir.join("nutrition-db.md"),
+        "## Apple\n\n```yaml\nper_100g:\n  kcal: 99\n```\n",
+    )
+    .unwrap();
+
+    daylog::materializer::rebuild_all(&conn, notes_dir, &config, &registry).unwrap();
+
+    let kcal: f64 = conn
+        .query_row(
+            "SELECT kcal_per_100g FROM foods WHERE name = 'Apple'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(kcal, 99.0);
+}
+
+#[test]
+fn sync_all_silent_when_nutrition_db_missing() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let notes_dir = dir.path();
+    std::fs::write(
+        notes_dir.join("2026-04-29.md"),
+        "---\ndate: 2026-04-29\n---\n",
+    )
+    .unwrap();
+    // No nutrition-db.md.
+
+    let db_path = notes_dir.join(".daylog.db");
+    let config: daylog::config::Config = toml::from_str(&format!(
+        "notes_dir = '{}'\n",
+        notes_dir.display().to_string().replace('\\', "/")
+    ))
+    .unwrap();
+    let registry = daylog::modules::build_registry(&config);
+    let conn = daylog::db::open_rw(&db_path).unwrap();
+    daylog::db::init_db(&conn, &registry).unwrap();
+    daylog::modules::validate_module_tables(&registry).unwrap();
+
+    let (_synced, errors) =
+        daylog::materializer::sync_all(&conn, notes_dir, &config, &registry).unwrap();
+    assert_eq!(errors, 0);
+
+    let foods_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM foods", [], |r| r.get(0))
+        .unwrap();
+    assert_eq!(foods_count, 0);
+}

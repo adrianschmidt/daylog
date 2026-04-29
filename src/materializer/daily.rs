@@ -289,6 +289,29 @@ pub fn sync_all(
         }
     }
 
+    let nutrition_path = notes_dir.join("nutrition-db.md");
+    if nutrition_path.exists() {
+        let mtime = std::fs::metadata(&nutrition_path)
+            .ok()
+            .and_then(|m| m.modified().ok())
+            .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+            .map(|d| d.as_secs_f64())
+            .unwrap_or(0.0);
+        if mtime >= threshold {
+            match crate::materializer::nutrition::materialize_nutrition_db(
+                conn,
+                &nutrition_path,
+                config,
+            ) {
+                Ok(_n) => synced += 1,
+                Err(e) => {
+                    eprintln!("Error parsing nutrition-db.md: {e}");
+                    errors += 1;
+                }
+            }
+        }
+    }
+
     let now = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -313,6 +336,21 @@ pub fn rebuild_all(
             Ok(()) => synced += 1,
             Err(e) => {
                 eprintln!("Error parsing {}: {e}", entry.display());
+                errors += 1;
+            }
+        }
+    }
+
+    let nutrition_path = notes_dir.join("nutrition-db.md");
+    if nutrition_path.exists() {
+        match crate::materializer::nutrition::materialize_nutrition_db(
+            conn,
+            &nutrition_path,
+            config,
+        ) {
+            Ok(_n) => synced += 1,
+            Err(e) => {
+                eprintln!("Error parsing nutrition-db.md: {e}");
                 errors += 1;
             }
         }
