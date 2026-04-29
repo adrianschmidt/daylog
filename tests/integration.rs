@@ -334,3 +334,31 @@ fn sync_all_silent_when_nutrition_db_missing() {
         .unwrap();
     assert_eq!(foods_count, 0);
 }
+
+#[test]
+fn status_json_includes_nutrition_db() {
+    let dir = tempfile::TempDir::new().unwrap();
+    let notes_dir = dir.path();
+    std::fs::write(
+        notes_dir.join("nutrition-db.md"),
+        "## Apple\n\n```yaml\nper_100g:\n  kcal: 52\n```\n",
+    )
+    .unwrap();
+
+    let db_path = notes_dir.join(".daylog.db");
+    let config: daylog::config::Config = toml::from_str(&format!(
+        "notes_dir = '{}'\n",
+        notes_dir.display().to_string().replace('\\', "/")
+    ))
+    .unwrap();
+    let registry = daylog::modules::build_registry(&config);
+    let conn = daylog::db::open_rw(&db_path).unwrap();
+    daylog::db::init_db(&conn, &registry).unwrap();
+    daylog::modules::validate_module_tables(&registry).unwrap();
+
+    daylog::materializer::sync_all(&conn, notes_dir, &config, &registry).unwrap();
+
+    let status = daylog::db::nutrition_status(&conn).unwrap();
+    assert_eq!(status.foods_count, 1);
+    assert!(status.last_synced.is_some());
+}
