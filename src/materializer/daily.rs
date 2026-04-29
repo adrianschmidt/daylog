@@ -432,7 +432,7 @@ pub fn start_watcher(
                                 continue;
                             }
 
-                            if is_note_file(path) {
+                            if materialized_file_kind(path).is_some() {
                                 pending_files.insert(path.clone());
                             }
                         }
@@ -463,27 +463,50 @@ pub fn start_watcher(
                 let conn = conn_opt.as_ref().unwrap();
                 let mut conn_failed = false;
                 for path in pending_files.drain() {
-                    if path.exists() {
-                        if let Err(e) = materialize_file(conn, &path, &current_config, &modules) {
-                            let err_str = e.to_string();
-                            eprintln!("Warning: failed to parse {}: {e}", path.display());
-                            // Detect connection-level failures
-                            if err_str.contains("disk I/O error")
-                                || err_str.contains("database is locked")
-                                || err_str.contains("unable to open")
-                            {
-                                conn_failed = true;
-                                break;
+                    if !path.exists() {
+                        match materialized_file_kind(&path) {
+                            Some(FileKind::DailyNote) => {
+                                if let Some(date) = path.file_stem().and_then(|s| s.to_str()) {
+                                    if is_valid_date(date) {
+                                        let _ = db::delete_date(conn, date);
+                                    }
+                                }
                             }
-                            let _ = conn.execute(
-                                "INSERT OR REPLACE INTO sync_meta (key, value) VALUES ('last_error', ?1)",
-                                [format!("{}: {e}", path.display())],
-                            );
+                            Some(FileKind::NutritionDb) => {
+                                // Spec: deletion is a no-op; foods table retained.
+                            }
+                            None => {}
                         }
-                    } else if let Some(date) = path.file_stem().and_then(|s| s.to_str()) {
-                        if is_valid_date(date) {
-                            let _ = db::delete_date(conn, date);
+                        continue;
+                    }
+                    let result = match materialized_file_kind(&path) {
+                        Some(FileKind::DailyNote) => {
+                            materialize_file(conn, &path, &current_config, &modules)
                         }
+                        Some(FileKind::NutritionDb) => {
+                            crate::materializer::nutrition::materialize_nutrition_db(
+                                conn,
+                                &path,
+                                &current_config,
+                            )
+                            .map(|_| ())
+                        }
+                        None => continue,
+                    };
+                    if let Err(e) = result {
+                        let err_str = e.to_string();
+                        eprintln!("Warning: failed to parse {}: {e}", path.display());
+                        if err_str.contains("disk I/O error")
+                            || err_str.contains("database is locked")
+                            || err_str.contains("unable to open")
+                        {
+                            conn_failed = true;
+                            break;
+                        }
+                        let _ = conn.execute(
+                            "INSERT OR REPLACE INTO sync_meta (key, value) VALUES ('last_error', ?1)",
+                            [format!("{}: {e}", path.display())],
+                        );
                     }
                 }
                 if conn_failed {
@@ -903,5 +926,18 @@ mod tests {
         assert_eq!(materialized_file_kind(&p("README.md")), None);
         assert_eq!(materialized_file_kind(&p("notes.txt")), None);
         assert_eq!(materialized_file_kind(&p("food.md")), None);
+    }
+
+    #[test]
+    fn watcher_dispatch_recognizes_both_kinds() {
+        let daily = std::path::Path::new("/notes/2026-04-29.md");
+        let nutrition = std::path::Path::new("/notes/nutrition-db.md");
+        let other = std::path::Path::new("/notes/scratch.md");
+        assert_eq!(materialized_file_kind(daily), Some(FileKind::DailyNote));
+        assert_eq!(
+            materialized_file_kind(nutrition),
+            Some(FileKind::NutritionDb)
+        );
+        assert!(materialized_file_kind(other).is_none());
     }
 }
