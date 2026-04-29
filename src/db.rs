@@ -579,7 +579,8 @@ pub fn nutrition_status(conn: &Connection) -> Result<NutritionStatus> {
             [],
             |r| r.get(0),
         )
-        .optional()?;
+        .optional()?
+        .filter(|s: &String| !s.is_empty());
     Ok(NutritionStatus {
         foods_count,
         last_synced,
@@ -896,5 +897,19 @@ mod tests {
         let s = nutrition_status(&conn).unwrap();
         assert_eq!(s.foods_count, 1);
         assert_eq!(s.last_synced.as_deref(), Some("2026-04-29T14:22:11"));
+    }
+
+    #[test]
+    fn test_nutrition_status_empty_string_treated_as_none() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(CORE_SCHEMA).unwrap();
+        conn.execute(
+            "INSERT INTO sync_meta (key, value) VALUES ('last_nutrition_sync', '')",
+            [],
+        )
+        .unwrap();
+
+        let s = nutrition_status(&conn).unwrap();
+        assert!(s.last_synced.is_none());
     }
 }
