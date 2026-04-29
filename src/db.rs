@@ -371,11 +371,14 @@ pub fn delete_all_foods(conn: &Connection) -> Result<()> {
 
 /// Insert one food (plus its aliases and ingredients) and return the new id.
 /// Returns Err on a UNIQUE conflict on `name` — caller decides whether to
-/// skip-and-warn or abort.
+/// skip-and-warn or abort. Caller is expected to run this inside a
+/// transaction; partial writes can otherwise leak on alias/ingredient failure.
 pub fn insert_food(conn: &Connection, food: &FoodInsert) -> Result<i64> {
-    let p100g = food.per_100g.clone().unwrap_or_default();
-    let p100ml = food.per_100ml.clone().unwrap_or_default();
-    let total = food.total.clone().unwrap_or_default();
+    let default_panel = NutrientPanel::default();
+    let default_total = TotalPanel::default();
+    let p100g = food.per_100g.as_ref().unwrap_or(&default_panel);
+    let p100ml = food.per_100ml.as_ref().unwrap_or(&default_panel);
+    let total = food.total.as_ref().unwrap_or(&default_total);
     conn.execute(
         "INSERT INTO foods (
             name,
