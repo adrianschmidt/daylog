@@ -33,6 +33,59 @@ CREATE TABLE IF NOT EXISTS sync_meta (
     key TEXT PRIMARY KEY,
     value TEXT
 );
+
+CREATE TABLE IF NOT EXISTS foods (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT NOT NULL UNIQUE,
+    kcal_per_100g       REAL,
+    protein_per_100g    REAL,
+    carbs_per_100g      REAL,
+    fat_per_100g        REAL,
+    sat_fat_per_100g    REAL,
+    sugar_per_100g      REAL,
+    salt_per_100g       REAL,
+    fiber_per_100g      REAL,
+    kcal_per_100ml      REAL,
+    protein_per_100ml   REAL,
+    carbs_per_100ml     REAL,
+    fat_per_100ml       REAL,
+    sat_fat_per_100ml   REAL,
+    sugar_per_100ml     REAL,
+    salt_per_100ml      REAL,
+    fiber_per_100ml     REAL,
+    density_g_per_ml    REAL,
+    total_weight_g      REAL,
+    total_kcal          REAL,
+    total_protein       REAL,
+    total_carbs         REAL,
+    total_fat           REAL,
+    total_sat_fat       REAL,
+    total_sugar         REAL,
+    total_salt          REAL,
+    total_fiber         REAL,
+    gi                  REAL,
+    gl_per_100g         REAL,
+    gl_per_100ml        REAL,
+    ii                  REAL,
+    description         TEXT,
+    notes               TEXT
+);
+
+CREATE TABLE IF NOT EXISTS food_aliases (
+    food_id INTEGER NOT NULL REFERENCES foods(id) ON DELETE CASCADE,
+    alias TEXT NOT NULL,
+    PRIMARY KEY (food_id, alias)
+);
+
+CREATE INDEX IF NOT EXISTS idx_food_aliases_alias ON food_aliases(alias);
+
+CREATE TABLE IF NOT EXISTS food_ingredients (
+    food_id INTEGER NOT NULL REFERENCES foods(id) ON DELETE CASCADE,
+    position INTEGER NOT NULL,
+    ingredient_name TEXT NOT NULL,
+    amount_g REAL,
+    PRIMARY KEY (food_id, position)
+);
 ";
 
 /// Open a read-write connection for the watcher thread.
@@ -308,5 +361,78 @@ mod tests {
         assert!(get_last_sync(&conn).unwrap().is_none());
         set_last_sync(&conn, 1234567890.0).unwrap();
         assert_eq!(get_last_sync(&conn).unwrap(), Some(1234567890.0));
+    }
+
+    #[test]
+    fn test_core_schema_creates_food_tables() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(CORE_SCHEMA).unwrap();
+
+        let tables: Vec<String> = conn
+            .prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .unwrap();
+
+        assert!(tables.contains(&"foods".to_string()));
+        assert!(tables.contains(&"food_aliases".to_string()));
+        assert!(tables.contains(&"food_ingredients".to_string()));
+    }
+
+    #[test]
+    fn test_food_aliases_index_exists() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(CORE_SCHEMA).unwrap();
+
+        let indices: Vec<String> = conn
+            .prepare("SELECT name FROM sqlite_master WHERE type='index' AND name LIKE 'idx_%'")
+            .unwrap()
+            .query_map([], |row| row.get(0))
+            .unwrap()
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .unwrap();
+
+        assert!(indices.contains(&"idx_food_aliases_alias".to_string()));
+    }
+
+    #[test]
+    fn test_food_cascade_delete() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(CORE_SCHEMA).unwrap();
+
+        conn.execute(
+            "INSERT INTO foods (name, kcal_per_100g) VALUES ('Test Food', 100)",
+            [],
+        )
+        .unwrap();
+        let food_id: i64 = conn
+            .query_row("SELECT id FROM foods WHERE name = 'Test Food'", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        conn.execute(
+            "INSERT INTO food_aliases (food_id, alias) VALUES (?1, 'test')",
+            [food_id],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO food_ingredients (food_id, position, ingredient_name, amount_g)
+             VALUES (?1, 0, 'whey', 50.0)",
+            [food_id],
+        )
+        .unwrap();
+
+        conn.execute("DELETE FROM foods", []).unwrap();
+
+        let alias_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM food_aliases", [], |r| r.get(0))
+            .unwrap();
+        let ingredient_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM food_ingredients", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(alias_count, 0);
+        assert_eq!(ingredient_count, 0);
     }
 }
