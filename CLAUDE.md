@@ -36,9 +36,16 @@ src/
   lib.rs               Module declarations
   app.rs               TUI event loop, tab management, signal handling
   config.rs            TOML config loading, hot-reload, tilde expansion
-  db.rs                Core tables (days, metrics, sync_meta), migrations, queries
+  db.rs                Core tables (days, metrics, sync_meta, foods, food_aliases,
+                       food_ingredients), migrations, queries, FoodInsert/FoodLookup
+                       types, insert_food, lookup_food_by_name_or_alias, nutrition_status
   demo.rs              14-day demo data generator
-  materializer.rs      YAML preprocessor, file watcher, normalization dispatch
+  materializer/
+    mod.rs             Re-exports for daily and nutrition parsers
+    daily.rs           Daily-note YAML preprocessor + parser, file watcher dispatch,
+                       FileKind + materialized_file_kind
+    nutrition.rs       nutrition-db.md parser (## headings + fenced YAML), foods
+                       materialization with DELETE-then-INSERT-all
   frontmatter.rs       Line-oriented YAML frontmatter editor (preserves comments)
   cli/
     mod.rs             Clap CLI definition
