@@ -562,6 +562,29 @@ fn total_panel_or_none(p: &TotalPanel) -> Option<TotalPanel> {
     }
 }
 
+#[derive(Debug, Clone)]
+pub struct NutritionStatus {
+    pub foods_count: i64,
+    pub last_synced: Option<String>,
+}
+
+pub fn nutrition_status(conn: &Connection) -> Result<NutritionStatus> {
+    let foods_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM foods", [], |r| r.get(0))
+        .unwrap_or(0);
+    let last_synced: Option<String> = conn
+        .query_row(
+            "SELECT value FROM sync_meta WHERE key = 'last_nutrition_sync'",
+            [],
+            |r| r.get(0),
+        )
+        .ok();
+    Ok(NutritionStatus {
+        foods_count,
+        last_synced,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -846,5 +869,31 @@ mod tests {
             .unwrap();
         assert_eq!(food_count, 0);
         assert_eq!(alias_count, 0);
+    }
+
+    #[test]
+    fn test_nutrition_status_empty() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(CORE_SCHEMA).unwrap();
+
+        let s = nutrition_status(&conn).unwrap();
+        assert_eq!(s.foods_count, 0);
+        assert!(s.last_synced.is_none());
+    }
+
+    #[test]
+    fn test_nutrition_status_after_insert() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(CORE_SCHEMA).unwrap();
+        insert_food(&conn, &sample_food_insert()).unwrap();
+        conn.execute(
+            "INSERT INTO sync_meta (key, value) VALUES ('last_nutrition_sync', '2026-04-29T14:22:11')",
+            [],
+        )
+        .unwrap();
+
+        let s = nutrition_status(&conn).unwrap();
+        assert_eq!(s.foods_count, 1);
+        assert_eq!(s.last_synced.as_deref(), Some("2026-04-29T14:22:11"));
     }
 }
