@@ -6,7 +6,6 @@ use std::sync::LazyLock;
 use yaml_rust2::{Yaml, YamlLoader};
 
 #[derive(Debug, Clone)]
-#[allow(dead_code)]
 pub(crate) struct ParsedEntry {
     pub name: String,
     pub yaml: Yaml,
@@ -14,18 +13,14 @@ pub(crate) struct ParsedEntry {
     pub line_number: usize,
 }
 
-#[allow(dead_code)] // Used by split_entries; wired into materializer in a follow-up task.
 static RE_HEADING: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r"^##\s+(.+?)\s*$").unwrap());
-#[allow(dead_code)] // Used by split_entries; wired into materializer in a follow-up task.
 static RE_YAML_FENCE: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r"^```yaml\s*$").unwrap());
-#[allow(dead_code)] // Used by split_entries; wired into materializer in a follow-up task.
 static RE_FENCE_CLOSE: LazyLock<regex::Regex> =
     LazyLock::new(|| regex::Regex::new(r"^```\s*$").unwrap());
 
 #[derive(Default)]
-#[allow(dead_code)] // Used by split_entries; wired into materializer in a follow-up task.
 struct PendingEntry {
     name: String,
     line_number: usize,
@@ -35,7 +30,6 @@ struct PendingEntry {
     yaml_seen: bool,
 }
 
-#[allow(dead_code)] // Wired into materialize_nutrition_db in a follow-up task.
 pub(crate) fn split_entries(content: &str) -> Vec<ParsedEntry> {
     let mut entries = Vec::new();
     let mut current: Option<PendingEntry> = None;
@@ -89,7 +83,6 @@ pub(crate) fn split_entries(content: &str) -> Vec<ParsedEntry> {
     entries
 }
 
-#[allow(dead_code)] // Used by split_entries; wired into materializer in a follow-up task.
 fn finalize(pending: PendingEntry) -> Option<ParsedEntry> {
     if !pending.yaml_seen {
         eprintln!(
@@ -125,7 +118,6 @@ fn finalize(pending: PendingEntry) -> Option<ParsedEntry> {
 use crate::db::{FoodIngredient, FoodInsert, NutrientPanel, TotalPanel};
 use color_eyre::eyre::eyre;
 
-#[allow(dead_code)]
 const KNOWN_TOP_LEVEL_KEYS: &[&str] = &[
     "per_100g",
     "per_100ml",
@@ -140,7 +132,6 @@ const KNOWN_TOP_LEVEL_KEYS: &[&str] = &[
     "total",
 ];
 
-#[allow(dead_code)]
 pub(crate) fn build_food_insert(entry: &ParsedEntry) -> Result<FoodInsert> {
     let yaml = &entry.yaml;
     if matches!(yaml, Yaml::BadValue | Yaml::Null) {
@@ -233,7 +224,6 @@ pub(crate) fn build_food_insert(entry: &ParsedEntry) -> Result<FoodInsert> {
     })
 }
 
-#[allow(dead_code)]
 fn read_nutrient_panel(node: &Yaml) -> Option<NutrientPanel> {
     if matches!(node, Yaml::BadValue | Yaml::Null) {
         return None;
@@ -255,7 +245,6 @@ fn read_nutrient_panel(node: &Yaml) -> Option<NutrientPanel> {
     }
 }
 
-#[allow(dead_code)]
 fn read_total_panel(node: &Yaml) -> Option<TotalPanel> {
     if matches!(node, Yaml::BadValue | Yaml::Null) {
         return None;
@@ -278,7 +267,6 @@ fn read_total_panel(node: &Yaml) -> Option<TotalPanel> {
     }
 }
 
-#[allow(dead_code)]
 fn read_real(node: &Yaml) -> Option<f64> {
     match node {
         Yaml::Real(s) => s.parse().ok(),
@@ -288,7 +276,6 @@ fn read_real(node: &Yaml) -> Option<f64> {
     }
 }
 
-#[allow(dead_code)]
 fn read_string(node: &Yaml) -> Option<String> {
     match node {
         Yaml::String(s) => {
@@ -303,7 +290,6 @@ fn read_string(node: &Yaml) -> Option<String> {
     }
 }
 
-#[allow(dead_code)]
 fn read_string_list(node: &Yaml) -> Vec<String> {
     match node {
         Yaml::Array(arr) => arr
@@ -318,7 +304,6 @@ fn read_string_list(node: &Yaml) -> Vec<String> {
     }
 }
 
-#[allow(dead_code)]
 fn read_ingredients(node: &Yaml, entry_name: &str, lineno: usize) -> Vec<FoodIngredient> {
     let Yaml::Array(arr) = node else {
         return vec![];
@@ -347,11 +332,72 @@ fn read_ingredients(node: &Yaml, entry_name: &str, lineno: usize) -> Vec<FoodIng
 }
 
 pub fn materialize_nutrition_db(
-    _conn: &Connection,
-    _file_path: &Path,
+    conn: &Connection,
+    file_path: &Path,
     _config: &Config,
 ) -> Result<usize> {
-    Ok(0)
+    if !file_path.exists() {
+        return Ok(0);
+    }
+    let content = std::fs::read_to_string(file_path)
+        .map_err(|e| eyre!("failed to read {}: {e}", file_path.display()))?;
+
+    let entries = split_entries(&content);
+    if entries.is_empty() {
+        return Ok(0);
+    }
+
+    let mut food_inserts: Vec<FoodInsert> = Vec::new();
+    for entry in &entries {
+        match build_food_insert(entry) {
+            Ok(fi) => food_inserts.push(fi),
+            Err(e) => eprintln!(
+                "Warning: nutrition-db.md entry '{}' (line {}): {e}",
+                entry.name, entry.line_number
+            ),
+        }
+    }
+
+    let tx = conn.unchecked_transaction()?;
+    crate::db::delete_all_foods(&tx)?;
+
+    let mut inserted = 0usize;
+    let mut seen_names: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for fi in &food_inserts {
+        if !seen_names.insert(fi.name.clone()) {
+            eprintln!(
+                "Warning: nutrition-db.md duplicate heading '{}' — first occurrence kept",
+                fi.name
+            );
+            continue;
+        }
+        match crate::db::insert_food(&tx, fi) {
+            Ok(_id) => inserted += 1,
+            Err(e) => eprintln!(
+                "Warning: nutrition-db.md insert failed for '{}': {e}",
+                fi.name
+            ),
+        }
+    }
+
+    let mtime = std::fs::metadata(file_path)
+        .and_then(|m| m.modified())
+        .ok()
+        .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+        .map(|d| {
+            let secs = d.as_secs() as i64;
+            chrono::DateTime::<chrono::Utc>::from_timestamp(secs, 0)
+                .map(|dt| dt.to_rfc3339())
+                .unwrap_or_default()
+        })
+        .unwrap_or_default();
+    tx.execute(
+        "INSERT OR REPLACE INTO sync_meta (key, value) VALUES ('last_nutrition_sync', ?1)",
+        [mtime],
+    )?;
+    tx.commit()?;
+
+    Ok(inserted)
 }
 
 #[cfg(test)]
@@ -598,6 +644,7 @@ per_100g:
             a.len()
         };
         assert_eq!(unique_count, aliases.len());
+        assert!(!fi.aliases.iter().any(|a| a.is_empty()));
     }
 
     #[test]
@@ -642,5 +689,194 @@ per_100g:
         entry.notes = Some("Some prose.".to_string());
         let fi = build_food_insert(&entry).unwrap();
         assert_eq!(fi.notes.as_deref(), Some("Some prose."));
+    }
+
+    use crate::db::CORE_SCHEMA_TEST_HOOK;
+    use std::io::Write;
+    use tempfile::TempDir;
+
+    fn open_inmem_with_schema() -> rusqlite::Connection {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(CORE_SCHEMA_TEST_HOOK).unwrap();
+        conn
+    }
+
+    fn write_fixture(dir: &TempDir, content: &str) -> std::path::PathBuf {
+        let path = dir.path().join("nutrition-db.md");
+        let mut f = std::fs::File::create(&path).unwrap();
+        f.write_all(content.as_bytes()).unwrap();
+        path
+    }
+
+    fn empty_config() -> Config {
+        toml::from_str("notes_dir = '/tmp'\n").unwrap()
+    }
+
+    #[test]
+    fn materialize_three_entries_e2e() {
+        let conn = open_inmem_with_schema();
+        let dir = TempDir::new().unwrap();
+        let content = r#"# Nutrition
+
+## Kelda Skogssvampsoppa
+
+```yaml
+per_100g:
+  kcal: 70
+  protein: 1.4
+gi: 40
+aliases: [skogssvampsoppa]
+```
+
+## Helmjölk
+
+```yaml
+per_100ml:
+  kcal: 62
+density_g_per_ml: 1.03
+aliases: [mjölk]
+```
+
+## proteinshake
+
+```yaml
+description: 62g pulver + 4 dl vatten
+total:
+  weight_g: 462
+  kcal: 234
+ingredients:
+  - food: Whey
+    amount_g: 62
+  - food: Water
+    amount_g: 400
+```
+"#;
+        let path = write_fixture(&dir, content);
+        let n = materialize_nutrition_db(&conn, &path, &empty_config()).unwrap();
+        assert_eq!(n, 3);
+
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM foods", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(count, 3);
+
+        let alias_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM food_aliases", [], |r| r.get(0))
+            .unwrap();
+        // 3 headings + 1 explicit alias each (skogssvampsoppa, mjölk) +
+        // proteinshake heading already auto-added → 5
+        assert!(alias_count >= 5);
+
+        let ingredient_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM food_ingredients", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(ingredient_count, 2);
+    }
+
+    #[test]
+    fn materialize_replaces_on_rerun() {
+        let conn = open_inmem_with_schema();
+        let dir = TempDir::new().unwrap();
+
+        let v1 = "## A\n\n```yaml\nper_100g:\n  kcal: 1\n```\n\n## B\n\n```yaml\nper_100g:\n  kcal: 2\n```\n";
+        let v2 = "## A\n\n```yaml\nper_100g:\n  kcal: 1\n```\n";
+
+        let path = write_fixture(&dir, v1);
+        materialize_nutrition_db(&conn, &path, &empty_config()).unwrap();
+        std::fs::write(&path, v2).unwrap();
+        materialize_nutrition_db(&conn, &path, &empty_config()).unwrap();
+
+        let names: Vec<String> = conn
+            .prepare("SELECT name FROM foods ORDER BY name")
+            .unwrap()
+            .query_map([], |r| r.get::<_, String>(0))
+            .unwrap()
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(names, vec!["A".to_string()]);
+    }
+
+    #[test]
+    fn materialize_partial_failure_continues() {
+        let conn = open_inmem_with_schema();
+        let dir = TempDir::new().unwrap();
+        let content = r#"## Good1
+
+```yaml
+per_100g:
+  kcal: 1
+```
+
+## Bad
+
+```yaml
+gi: 40
+```
+
+## Good2
+
+```yaml
+per_100g:
+  kcal: 2
+```
+"#;
+        let path = write_fixture(&dir, content);
+        let n = materialize_nutrition_db(&conn, &path, &empty_config()).unwrap();
+        assert_eq!(n, 2);
+
+        let names: Vec<String> = conn
+            .prepare("SELECT name FROM foods ORDER BY name")
+            .unwrap()
+            .query_map([], |r| r.get::<_, String>(0))
+            .unwrap()
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(names, vec!["Good1".to_string(), "Good2".to_string()]);
+    }
+
+    #[test]
+    fn materialize_missing_file_is_silent() {
+        let conn = open_inmem_with_schema();
+        let dir = TempDir::new().unwrap();
+        let path = dir.path().join("nutrition-db.md");
+        // file does not exist
+        let n = materialize_nutrition_db(&conn, &path, &empty_config()).unwrap();
+        assert_eq!(n, 0);
+    }
+
+    #[test]
+    fn materialize_records_last_synced() {
+        let conn = open_inmem_with_schema();
+        let dir = TempDir::new().unwrap();
+        let path = write_fixture(&dir, "## A\n\n```yaml\nper_100g:\n  kcal: 1\n```\n");
+        materialize_nutrition_db(&conn, &path, &empty_config()).unwrap();
+
+        let last: Option<String> = conn
+            .query_row(
+                "SELECT value FROM sync_meta WHERE key = 'last_nutrition_sync'",
+                [],
+                |r| r.get(0),
+            )
+            .ok();
+        assert!(last.is_some());
+    }
+
+    #[test]
+    fn materialize_duplicate_heading_keeps_first() {
+        let conn = open_inmem_with_schema();
+        let dir = TempDir::new().unwrap();
+        let content = "## Foo\n\n```yaml\nper_100g:\n  kcal: 1\n```\n\n## Foo\n\n```yaml\nper_100g:\n  kcal: 999\n```\n";
+        let path = write_fixture(&dir, content);
+        let n = materialize_nutrition_db(&conn, &path, &empty_config()).unwrap();
+        assert_eq!(n, 1);
+
+        let kcal: f64 = conn
+            .query_row(
+                "SELECT kcal_per_100g FROM foods WHERE name = 'Foo'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(kcal, 1.0);
     }
 }
