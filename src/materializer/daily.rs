@@ -1,23 +1,3 @@
-/// What kind of file the materializer recognizes. Used by the watcher
-/// dispatch and by sync/rebuild to pick the right parser.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum FileKind {
-    DailyNote,
-    NutritionDb,
-}
-
-/// Classify a path. Returns `None` for hidden, swap, or unrelated files.
-pub fn materialized_file_kind(path: &std::path::Path) -> Option<FileKind> {
-    if is_note_file(path) {
-        return Some(FileKind::DailyNote);
-    }
-    let filename = path.file_name().and_then(|f| f.to_str())?;
-    if filename == "nutrition-db.md" {
-        return Some(FileKind::NutritionDb);
-    }
-    None
-}
-
 use color_eyre::eyre::{Result, WrapErr};
 use regex::Regex;
 use rusqlite::Connection;
@@ -28,6 +8,29 @@ use yaml_rust2::{Yaml, YamlLoader};
 use crate::config::Config;
 use crate::db;
 use crate::modules::{InsertOp, Module};
+
+/// What kind of file the materializer recognizes. Used by the watcher
+/// dispatch and by sync/rebuild to pick the right parser.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileKind {
+    DailyNote,
+    NutritionDb,
+}
+
+/// Classify a path. Returns `None` for hidden, swap, or unrelated files.
+pub fn materialized_file_kind(path: &Path) -> Option<FileKind> {
+    let filename = path.file_name().and_then(|f| f.to_str())?;
+    if filename.starts_with('.') || filename.starts_with('~') || filename.ends_with('~') {
+        return None;
+    }
+    if RE_NOTE_FILE.is_match(filename) {
+        return Some(FileKind::DailyNote);
+    }
+    if filename == "nutrition-db.md" {
+        return Some(FileKind::NutritionDb);
+    }
+    None
+}
 
 // --- YAML Preprocessing ---
 
@@ -818,5 +821,49 @@ mod tests {
             .unwrap();
         assert_eq!(start, "22:30");
         assert_eq!(end, "06:15");
+    }
+
+    use std::path::PathBuf;
+
+    fn p(s: &str) -> PathBuf {
+        PathBuf::from(s)
+    }
+
+    #[test]
+    fn file_kind_classifies_daily_note() {
+        assert_eq!(
+            materialized_file_kind(&p("2026-04-29.md")),
+            Some(FileKind::DailyNote)
+        );
+        assert_eq!(
+            materialized_file_kind(&p("/tmp/notes/2026-04-29.md")),
+            Some(FileKind::DailyNote)
+        );
+    }
+
+    #[test]
+    fn file_kind_classifies_nutrition_db() {
+        assert_eq!(
+            materialized_file_kind(&p("nutrition-db.md")),
+            Some(FileKind::NutritionDb)
+        );
+        assert_eq!(
+            materialized_file_kind(&p("/tmp/notes/nutrition-db.md")),
+            Some(FileKind::NutritionDb)
+        );
+    }
+
+    #[test]
+    fn file_kind_rejects_hidden_and_swap() {
+        assert_eq!(materialized_file_kind(&p(".2026-04-29.md")), None);
+        assert_eq!(materialized_file_kind(&p("~nutrition-db.md")), None);
+        assert_eq!(materialized_file_kind(&p("nutrition-db.md~")), None);
+    }
+
+    #[test]
+    fn file_kind_rejects_unrelated() {
+        assert_eq!(materialized_file_kind(&p("README.md")), None);
+        assert_eq!(materialized_file_kind(&p("notes.txt")), None);
+        assert_eq!(materialized_file_kind(&p("food.md")), None);
     }
 }
