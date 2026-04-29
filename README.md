@@ -159,6 +159,69 @@ daylog is designed for AI agents:
 - Ships with a Claude Code skill for seamless integration
 - `AGENTS.md` documents the full AI interface
 
+## Nutrition database
+
+Daylog reads `{notes_dir}/nutrition-db.md` (if present) and materializes it into a `foods` table that other tooling can query. The file is the source of truth — SQLite is a derived cache.
+
+Each entry is one `## Heading` followed by a fenced ` ```yaml ` block. Freeform prose under the block is preserved as `notes`.
+
+`````markdown
+## Kelda Skogssvampsoppa
+
+```yaml
+per_100g:
+  kcal: 70
+  protein: 1.4
+  carbs: 4.8
+  fat: 5.0
+gi: 40
+gl_per_100g: 2
+ii: 35
+aliases: [skogssvampsoppa]
+```
+
+Innehåller svamp + grädde — IBS-trigger.
+
+## proteinshake
+
+```yaml
+description: 62g pulver + 4 dl vatten
+total:
+  weight_g: 462
+  kcal: 234
+  protein: 48
+ingredients:
+  - food: Whey
+    amount_g: 62
+gi: 5
+ii: 85
+```
+`````
+
+### Recognized fields
+
+At least one of `per_100g`, `per_100ml`, or `total` must be present. Everything else is optional.
+
+| Field | Meaning |
+|---|---|
+| `per_100g` / `per_100ml` | Nutrient panel: `kcal`, `protein`, `carbs`, `fat`, `sat_fat`, `sugar`, `salt`, `fiber` |
+| `density_g_per_ml` | Conversion between weight and volume |
+| `gi` | Glycemic index |
+| `gl_per_100g` / `gl_per_100ml` | Glycemic load |
+| `ii` | Insulin index |
+| `aliases` | Lowercased lookup names. The heading is auto-added. |
+| `description` | Free-text composition (e.g. "62g pulver + 4 dl vatten") |
+| `ingredients` | List of `{food, amount_g}` for composite recipes |
+| `total` | Composite recipe totals (`weight_g`, `kcal`, ... ) |
+
+### Convention: raw vs. cooked
+
+When a food has materially different nutritional values raw vs. cooked (chicken, lentils, ground meat), record one entry per state, named distinctly: `Kycklingbiffar (rå)` and `Kycklingbiffar (stekt)`. The schema stores one panel per row; multi-state foods are split.
+
+### Watcher and rebuild
+
+The file is parsed live by the watcher on every save, and re-parsed from scratch by `daylog rebuild`. Per-entry parse failures warn to stderr; other entries still get loaded. Deleting the file is a no-op — the `foods` table retains its last successful state. `daylog status --json` reports `nutrition_db.foods_count` and `nutrition_db.last_synced`.
+
 ## Architecture
 
 Two threads, one SQLite database (WAL mode), no async runtime.
