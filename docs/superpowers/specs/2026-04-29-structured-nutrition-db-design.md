@@ -121,6 +121,12 @@ aliases: [helmjölk, mjölk]
 
 ```yaml
 description: 62g pulver + 4 dl vatten
+total:
+  weight_g: 462          # 62g powder + 400g water
+  kcal: 234
+  protein: 48
+  carbs: 2.4
+  fat: 3.6
 ingredients:
   - food: Body Science Whey 100% Madagascar Vanilla
     amount_g: 62
@@ -139,7 +145,8 @@ All optional except: at least one of `per_100g` / `per_100ml` / `total` must be 
 | `per_100ml` | mapping | Canonical for liquids. Same subkeys. |
 | `density_g_per_ml` | real (>0) | Rejected if ≤ 0. |
 | `gi` | real | Glycemic index. Warning logged (still stored) if outside 0..200. |
-| `gl_per_100g` | real | Glycemic load per 100g. |
+| `gl_per_100g` | real | Glycemic load per 100g (for solids). |
+| `gl_per_100ml` | real | Glycemic load per 100ml (for liquids). |
 | `ii` | real | Insulin index. Warning logged (still stored) if outside 0..200. |
 | `aliases` | list of strings | Trimmed, lowercased, deduped. The heading's lowercased form is added implicitly. |
 | `description` | string | Free text — for composites like "62g pulver + 4 dl vatten". |
@@ -190,6 +197,7 @@ CREATE TABLE IF NOT EXISTS foods (
     -- Indices
     gi                  REAL,
     gl_per_100g         REAL,
+    gl_per_100ml        REAL,
     ii                  REAL,
     -- Free text
     description         TEXT,
@@ -260,6 +268,7 @@ pub struct FoodInsert {
     pub total: Option<TotalPanel>,
     pub gi: Option<f64>,
     pub gl_per_100g: Option<f64>,
+    pub gl_per_100ml: Option<f64>,
     pub ii: Option<f64>,
     pub description: Option<String>,
     pub notes: Option<String>,
@@ -278,6 +287,7 @@ pub struct FoodLookup {
     pub total: Option<TotalPanel>,
     pub gi: Option<f64>,
     pub gl_per_100g: Option<f64>,
+    pub gl_per_100ml: Option<f64>,
     pub ii: Option<f64>,
     pub description: Option<String>,
     pub notes: Option<String>,
@@ -467,6 +477,7 @@ No new config options. `nutrition-db.md` is expected at `{notes_dir}/nutrition-d
 - The format: heading + ```yaml block, with the recognized fields table.
 - Two short example entries (one solid + one composite).
 - A note that the file is parsed live by the watcher and rebuilt by `daylog rebuild`.
+- A convention note: foods that need distinct nutritional values for raw vs. cooked (e.g., `Kycklingbiffar (rå)` and `Kycklingbiffar (stekt)`) get one entry per state. The schema stores one density and one nutrient panel per row; multi-state foods are represented as separate entries.
 
 `CLAUDE.md` gains entries under "File Map" for the new `materializer/nutrition.rs` and the new `db.rs` helpers.
 
