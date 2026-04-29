@@ -297,6 +297,268 @@ pub fn load_metric_trend(
     Ok(rows)
 }
 
+// --- Foods (nutrition database) ---
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct NutrientPanel {
+    pub kcal: Option<f64>,
+    pub protein: Option<f64>,
+    pub carbs: Option<f64>,
+    pub fat: Option<f64>,
+    pub sat_fat: Option<f64>,
+    pub sugar: Option<f64>,
+    pub salt: Option<f64>,
+    pub fiber: Option<f64>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct TotalPanel {
+    pub weight_g: Option<f64>,
+    pub kcal: Option<f64>,
+    pub protein: Option<f64>,
+    pub carbs: Option<f64>,
+    pub fat: Option<f64>,
+    pub sat_fat: Option<f64>,
+    pub sugar: Option<f64>,
+    pub salt: Option<f64>,
+    pub fiber: Option<f64>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct FoodIngredient {
+    pub ingredient_name: String,
+    pub amount_g: Option<f64>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FoodInsert {
+    pub name: String,
+    pub per_100g: Option<NutrientPanel>,
+    pub per_100ml: Option<NutrientPanel>,
+    pub density_g_per_ml: Option<f64>,
+    pub total: Option<TotalPanel>,
+    pub gi: Option<f64>,
+    pub gl_per_100g: Option<f64>,
+    pub gl_per_100ml: Option<f64>,
+    pub ii: Option<f64>,
+    pub description: Option<String>,
+    pub notes: Option<String>,
+    pub aliases: Vec<String>,
+    pub ingredients: Vec<FoodIngredient>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FoodLookup {
+    pub id: i64,
+    pub name: String,
+    pub per_100g: Option<NutrientPanel>,
+    pub per_100ml: Option<NutrientPanel>,
+    pub density_g_per_ml: Option<f64>,
+    pub total: Option<TotalPanel>,
+    pub gi: Option<f64>,
+    pub gl_per_100g: Option<f64>,
+    pub gl_per_100ml: Option<f64>,
+    pub ii: Option<f64>,
+    pub description: Option<String>,
+    pub notes: Option<String>,
+}
+
+/// Delete every row in `foods`. CASCADEs to `food_aliases` and `food_ingredients`.
+pub fn delete_all_foods(conn: &Connection) -> Result<()> {
+    conn.execute("DELETE FROM foods", [])?;
+    Ok(())
+}
+
+/// Insert one food (plus its aliases and ingredients) and return the new id.
+/// Returns Err on a UNIQUE conflict on `name` — caller decides whether to
+/// skip-and-warn or abort.
+pub fn insert_food(conn: &Connection, food: &FoodInsert) -> Result<i64> {
+    let p100g = food.per_100g.clone().unwrap_or_default();
+    let p100ml = food.per_100ml.clone().unwrap_or_default();
+    let total = food.total.clone().unwrap_or_default();
+    conn.execute(
+        "INSERT INTO foods (
+            name,
+            kcal_per_100g, protein_per_100g, carbs_per_100g, fat_per_100g,
+            sat_fat_per_100g, sugar_per_100g, salt_per_100g, fiber_per_100g,
+            kcal_per_100ml, protein_per_100ml, carbs_per_100ml, fat_per_100ml,
+            sat_fat_per_100ml, sugar_per_100ml, salt_per_100ml, fiber_per_100ml,
+            density_g_per_ml,
+            total_weight_g, total_kcal, total_protein, total_carbs, total_fat,
+            total_sat_fat, total_sugar, total_salt, total_fiber,
+            gi, gl_per_100g, gl_per_100ml, ii,
+            description, notes
+        ) VALUES (
+            ?1,
+            ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
+            ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17,
+            ?18,
+            ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27,
+            ?28, ?29, ?30, ?31,
+            ?32, ?33
+        )",
+        rusqlite::params![
+            food.name,
+            p100g.kcal,
+            p100g.protein,
+            p100g.carbs,
+            p100g.fat,
+            p100g.sat_fat,
+            p100g.sugar,
+            p100g.salt,
+            p100g.fiber,
+            p100ml.kcal,
+            p100ml.protein,
+            p100ml.carbs,
+            p100ml.fat,
+            p100ml.sat_fat,
+            p100ml.sugar,
+            p100ml.salt,
+            p100ml.fiber,
+            food.density_g_per_ml,
+            total.weight_g,
+            total.kcal,
+            total.protein,
+            total.carbs,
+            total.fat,
+            total.sat_fat,
+            total.sugar,
+            total.salt,
+            total.fiber,
+            food.gi,
+            food.gl_per_100g,
+            food.gl_per_100ml,
+            food.ii,
+            food.description,
+            food.notes,
+        ],
+    )?;
+    let id = conn.last_insert_rowid();
+
+    for alias in &food.aliases {
+        conn.execute(
+            "INSERT OR IGNORE INTO food_aliases (food_id, alias) VALUES (?1, ?2)",
+            rusqlite::params![id, alias],
+        )?;
+    }
+    for (pos, ing) in food.ingredients.iter().enumerate() {
+        conn.execute(
+            "INSERT INTO food_ingredients (food_id, position, ingredient_name, amount_g)
+             VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![id, pos as i64, ing.ingredient_name, ing.amount_g],
+        )?;
+    }
+    Ok(id)
+}
+
+/// Case-insensitive lookup. Lowercases `query` before matching against
+/// `food_aliases.alias` (which is stored already lowercased — including
+/// the auto-inserted lowercased heading). Returns `None` if no match.
+pub fn lookup_food_by_name_or_alias(conn: &Connection, query: &str) -> Result<Option<FoodLookup>> {
+    let needle = query.trim().to_lowercase();
+    let row = conn.query_row(
+        "SELECT
+            f.id, f.name,
+            f.kcal_per_100g, f.protein_per_100g, f.carbs_per_100g, f.fat_per_100g,
+            f.sat_fat_per_100g, f.sugar_per_100g, f.salt_per_100g, f.fiber_per_100g,
+            f.kcal_per_100ml, f.protein_per_100ml, f.carbs_per_100ml, f.fat_per_100ml,
+            f.sat_fat_per_100ml, f.sugar_per_100ml, f.salt_per_100ml, f.fiber_per_100ml,
+            f.density_g_per_ml,
+            f.total_weight_g, f.total_kcal, f.total_protein, f.total_carbs, f.total_fat,
+            f.total_sat_fat, f.total_sugar, f.total_salt, f.total_fiber,
+            f.gi, f.gl_per_100g, f.gl_per_100ml, f.ii,
+            f.description, f.notes
+         FROM foods f JOIN food_aliases a ON a.food_id = f.id
+         WHERE a.alias = ?1 LIMIT 1",
+        [&needle],
+        |r| {
+            let panel_g = NutrientPanel {
+                kcal: r.get(2)?,
+                protein: r.get(3)?,
+                carbs: r.get(4)?,
+                fat: r.get(5)?,
+                sat_fat: r.get(6)?,
+                sugar: r.get(7)?,
+                salt: r.get(8)?,
+                fiber: r.get(9)?,
+            };
+            let panel_ml = NutrientPanel {
+                kcal: r.get(10)?,
+                protein: r.get(11)?,
+                carbs: r.get(12)?,
+                fat: r.get(13)?,
+                sat_fat: r.get(14)?,
+                sugar: r.get(15)?,
+                salt: r.get(16)?,
+                fiber: r.get(17)?,
+            };
+            let total = TotalPanel {
+                weight_g: r.get(19)?,
+                kcal: r.get(20)?,
+                protein: r.get(21)?,
+                carbs: r.get(22)?,
+                fat: r.get(23)?,
+                sat_fat: r.get(24)?,
+                sugar: r.get(25)?,
+                salt: r.get(26)?,
+                fiber: r.get(27)?,
+            };
+            Ok(FoodLookup {
+                id: r.get(0)?,
+                name: r.get(1)?,
+                per_100g: nutrient_panel_or_none(&panel_g),
+                per_100ml: nutrient_panel_or_none(&panel_ml),
+                density_g_per_ml: r.get(18)?,
+                total: total_panel_or_none(&total),
+                gi: r.get(28)?,
+                gl_per_100g: r.get(29)?,
+                gl_per_100ml: r.get(30)?,
+                ii: r.get(31)?,
+                description: r.get(32)?,
+                notes: r.get(33)?,
+            })
+        },
+    );
+    match row {
+        Ok(food) => Ok(Some(food)),
+        Err(rusqlite::Error::QueryReturnedNoRows) => Ok(None),
+        Err(e) => Err(e.into()),
+    }
+}
+
+fn nutrient_panel_or_none(p: &NutrientPanel) -> Option<NutrientPanel> {
+    if p.kcal.is_none()
+        && p.protein.is_none()
+        && p.carbs.is_none()
+        && p.fat.is_none()
+        && p.sat_fat.is_none()
+        && p.sugar.is_none()
+        && p.salt.is_none()
+        && p.fiber.is_none()
+    {
+        None
+    } else {
+        Some(p.clone())
+    }
+}
+
+fn total_panel_or_none(p: &TotalPanel) -> Option<TotalPanel> {
+    if p.weight_g.is_none()
+        && p.kcal.is_none()
+        && p.protein.is_none()
+        && p.carbs.is_none()
+        && p.fat.is_none()
+        && p.sat_fat.is_none()
+        && p.sugar.is_none()
+        && p.salt.is_none()
+        && p.fiber.is_none()
+    {
+        None
+    } else {
+        Some(p.clone())
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -434,5 +696,152 @@ mod tests {
             .unwrap();
         assert_eq!(alias_count, 0);
         assert_eq!(ingredient_count, 0);
+    }
+
+    fn sample_food_insert() -> FoodInsert {
+        FoodInsert {
+            name: "Kelda Skogssvampsoppa".to_string(),
+            per_100g: Some(NutrientPanel {
+                kcal: Some(70.0),
+                protein: Some(1.4),
+                carbs: Some(4.8),
+                fat: Some(5.0),
+                sat_fat: Some(3.0),
+                sugar: Some(1.6),
+                salt: Some(0.89),
+                fiber: None,
+            }),
+            per_100ml: None,
+            density_g_per_ml: None,
+            total: None,
+            gi: Some(40.0),
+            gl_per_100g: Some(2.0),
+            gl_per_100ml: None,
+            ii: Some(35.0),
+            description: None,
+            notes: Some("svamp + grädde".to_string()),
+            aliases: vec![
+                "kelda skogssvampsoppa".to_string(),
+                "skogssvampsoppa".to_string(),
+            ],
+            ingredients: vec![],
+        }
+    }
+
+    #[test]
+    fn test_insert_food_returns_id() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(CORE_SCHEMA).unwrap();
+
+        let id = insert_food(&conn, &sample_food_insert()).unwrap();
+        assert!(id > 0);
+    }
+
+    #[test]
+    fn test_insert_food_writes_aliases_and_ingredients() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(CORE_SCHEMA).unwrap();
+
+        let mut food = sample_food_insert();
+        food.ingredients = vec![
+            FoodIngredient {
+                ingredient_name: "Whey".to_string(),
+                amount_g: Some(62.0),
+            },
+            FoodIngredient {
+                ingredient_name: "Water".to_string(),
+                amount_g: None,
+            },
+        ];
+        let id = insert_food(&conn, &food).unwrap();
+
+        let alias_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM food_aliases WHERE food_id = ?1",
+                [id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(alias_count, 2);
+
+        let ingredients: Vec<(i64, String, Option<f64>)> = conn
+            .prepare(
+                "SELECT position, ingredient_name, amount_g
+                 FROM food_ingredients WHERE food_id = ?1 ORDER BY position",
+            )
+            .unwrap()
+            .query_map([id], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))
+            .unwrap()
+            .collect::<std::result::Result<Vec<_>, _>>()
+            .unwrap();
+        assert_eq!(ingredients.len(), 2);
+        assert_eq!(ingredients[0].0, 0);
+        assert_eq!(ingredients[0].1, "Whey");
+        assert_eq!(ingredients[0].2, Some(62.0));
+        assert_eq!(ingredients[1].0, 1);
+        assert_eq!(ingredients[1].2, None);
+    }
+
+    #[test]
+    fn test_lookup_food_by_name_case_insensitive() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(CORE_SCHEMA).unwrap();
+        insert_food(&conn, &sample_food_insert()).unwrap();
+
+        let by_lower = lookup_food_by_name_or_alias(&conn, "kelda skogssvampsoppa")
+            .unwrap()
+            .unwrap();
+        let by_canonical = lookup_food_by_name_or_alias(&conn, "Kelda Skogssvampsoppa")
+            .unwrap()
+            .unwrap();
+        let by_alias = lookup_food_by_name_or_alias(&conn, "Skogssvampsoppa")
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(by_lower.id, by_canonical.id);
+        assert_eq!(by_lower.id, by_alias.id);
+        assert_eq!(by_lower.name, "Kelda Skogssvampsoppa");
+        assert!(by_lower.per_100g.is_some());
+        assert_eq!(by_lower.per_100g.as_ref().unwrap().kcal, Some(70.0));
+    }
+
+    #[test]
+    fn test_lookup_food_missing_returns_none() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(CORE_SCHEMA).unwrap();
+        assert!(lookup_food_by_name_or_alias(&conn, "ghost food")
+            .unwrap()
+            .is_none());
+    }
+
+    #[test]
+    fn test_unique_name_conflict() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(CORE_SCHEMA).unwrap();
+        insert_food(&conn, &sample_food_insert()).unwrap();
+        let err = insert_food(&conn, &sample_food_insert()).unwrap_err();
+        let msg = format!("{err}");
+        assert!(
+            msg.to_lowercase().contains("unique") || msg.contains("constraint"),
+            "expected UNIQUE-style error, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn test_delete_all_foods_clears_children() {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(CORE_SCHEMA).unwrap();
+        insert_food(&conn, &sample_food_insert()).unwrap();
+
+        delete_all_foods(&conn).unwrap();
+
+        let food_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM foods", [], |r| r.get(0))
+            .unwrap();
+        let alias_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM food_aliases", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(food_count, 0);
+        assert_eq!(alias_count, 0);
     }
 }
