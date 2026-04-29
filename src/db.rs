@@ -1,6 +1,6 @@
 use crate::modules::{InsertOp, Module};
 use color_eyre::eyre::{Result, WrapErr};
-use rusqlite::{Connection, OpenFlags};
+use rusqlite::{Connection, OpenFlags, OptionalExtension};
 use std::path::Path;
 
 const CORE_SCHEMA: &str = "
@@ -569,16 +569,14 @@ pub struct NutritionStatus {
 }
 
 pub fn nutrition_status(conn: &Connection) -> Result<NutritionStatus> {
-    let foods_count: i64 = conn
-        .query_row("SELECT COUNT(*) FROM foods", [], |r| r.get(0))
-        .unwrap_or(0);
+    let foods_count: i64 = conn.query_row("SELECT COUNT(*) FROM foods", [], |r| r.get(0))?;
     let last_synced: Option<String> = conn
         .query_row(
             "SELECT value FROM sync_meta WHERE key = 'last_nutrition_sync'",
             [],
             |r| r.get(0),
         )
-        .ok();
+        .optional()?;
     Ok(NutritionStatus {
         foods_count,
         last_synced,
