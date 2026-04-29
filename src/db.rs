@@ -88,6 +88,9 @@ CREATE TABLE IF NOT EXISTS food_ingredients (
 );
 ";
 
+#[cfg(test)]
+pub const CORE_SCHEMA_TEST_HOOK: &str = CORE_SCHEMA;
+
 /// Open a read-write connection for the watcher thread.
 pub fn open_rw(path: &Path) -> Result<Connection> {
     let conn = Connection::open_with_flags(
