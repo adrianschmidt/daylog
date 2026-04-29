@@ -1,3 +1,23 @@
+/// What kind of file the materializer recognizes. Used by the watcher
+/// dispatch and by sync/rebuild to pick the right parser.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FileKind {
+    DailyNote,
+    NutritionDb,
+}
+
+/// Classify a path. Returns `None` for hidden, swap, or unrelated files.
+pub fn materialized_file_kind(path: &std::path::Path) -> Option<FileKind> {
+    if is_note_file(path) {
+        return Some(FileKind::DailyNote);
+    }
+    let filename = path.file_name().and_then(|f| f.to_str())?;
+    if filename == "nutrition-db.md" {
+        return Some(FileKind::NutritionDb);
+    }
+    None
+}
+
 use color_eyre::eyre::{Result, WrapErr};
 use regex::Regex;
 use rusqlite::Connection;
