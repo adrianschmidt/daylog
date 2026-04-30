@@ -97,4 +97,34 @@ mod tests {
             "lbs comment should not appear when unit is kg, got: {out}"
         );
     }
+
+    #[test]
+    fn renders_food_section() {
+        let config = config_with_unit("lbs");
+        let out = render_daily_note("2026-04-30", &config);
+        assert!(
+            out.contains("## Food"),
+            "expected ## Food section, got:\n{out}"
+        );
+    }
+
+    #[test]
+    fn renders_vitals_section() {
+        let config = config_with_unit("lbs");
+        let out = render_daily_note("2026-04-30", &config);
+        assert!(
+            out.contains("## Vitals"),
+            "expected ## Vitals section, got:\n{out}"
+        );
+    }
+
+    #[test]
+    fn renders_sections_in_canonical_order() {
+        let config = config_with_unit("lbs");
+        let out = render_daily_note("2026-04-30", &config);
+        let food = out.find("## Food").expect("## Food");
+        let vitals = out.find("## Vitals").expect("## Vitals");
+        let notes = out.find("## Notes").expect("## Notes");
+        assert!(food < vitals && vitals < notes, "wrong order:\n{out}");
+    }
 }
