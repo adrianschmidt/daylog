@@ -28,6 +28,15 @@ impl Slot {
     }
 }
 
+impl std::fmt::Display for Slot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Slot::Morning => write!(f, "morning"),
+            Slot::Evening => write!(f, "evening"),
+        }
+    }
+}
+
 /// Decide the slot from explicit flags or the measurement time.
 pub fn pick_slot(morning: bool, evening: bool, when: NaiveTime) -> Slot {
     if morning {
@@ -86,7 +95,7 @@ pub fn execute(
     let updated = body::append_line_to_section(&updated, "Vitals", &body_line);
 
     frontmatter::atomic_write(&note_path, &updated)?;
-    eprintln!("BP logged: {sys}/{dia}, pulse {pulse} bpm ({slot:?}) on {date_str}",);
+    eprintln!("BP logged: {date_str} {formatted_time} {sys}/{dia}, pulse {pulse} bpm ({slot})");
     Ok(())
 }
 
