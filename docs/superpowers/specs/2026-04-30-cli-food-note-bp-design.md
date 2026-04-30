@@ -46,6 +46,12 @@ database introduced in issue #10.
   acceptable and consistent with existing behavior.
 - Migrating existing `## Food` lines from Swedish labels to English. Adrian
   will do that locally via the daylog skill after this PR ships.
+- A configurable output language. The binary's output is English by
+  deliberate choice — daylog as a tool is in English, the daylog skill
+  parses Swedish input from Adrian and translates as needed. Adding
+  `[output] language = "sv" | "en"` is cheap to do later if a second user
+  wants Swedish output, but pre-building the knob would just create
+  half-translated output state-space.
 - Adding `bp_*_pulse` to the existing `[metrics]` config. The CLI writes
   the YAML field; surfacing pulse in the materialized DB is a user-side
   config change, not blocking.
@@ -55,8 +61,30 @@ database introduced in issue #10.
   machine-written notes.
 - `daylog vitals` as a generic command. v1 has only BP; if other vitals
   surface later, they get their own commands or flags.
+- Auto-consulting `.daylog-state.toml` pending sleep-start to pick the
+  target day. `effective_today()` (driven by `day_start_hour`) is the
+  canonical "what day is it" answer in daylog; an explicit `--date`
+  override covers the rest. Pending-bedtime coupling is a possible
+  follow-up if `day_start_hour` proves insufficient in practice.
 
 ## User-facing surface
+
+### Shared flags (all three commands)
+
+- **`--date YYYY-MM-DD`** — write to the named day's note instead of
+  today's. Useful for catching up after a missed day or correcting a
+  retroactive entry.
+- **`--time HH:MM`** — use the given time for the entry's `**HH:MM**`
+  prefix instead of `Local::now()`. Accepts both 24h (`08:30`) and 12h
+  (`8:30am`) — same parser as `daylog sleep-start`. Without `--time`,
+  `Local::now()` is used.
+- **Day resolution** when `--date` is absent: `config.effective_today()`.
+  This respects `day_start_hour`, so setting `day_start_hour = 4` makes
+  00:40 land on the previous day automatically. *Pending sleep-start is
+  not consulted in v1.*
+- **BP slot detection** (`daylog bp` only) uses the entry's `--time`
+  value if given, else `Local::now().time()`. So
+  `daylog bp --time 08:00 141 96 70` at 14:30 still slots as `morning`.
 
 ### `daylog food` — append to `## Food`, optional nutrition lookup
 
@@ -64,6 +92,7 @@ database introduced in issue #10.
 daylog food <name> [<amount>]
 daylog food --kcal N --protein N --carbs N --fat N
             [--gi N] [--gl N] [--ii N]
+            [--date YYYY-MM-DD] [--time HH:MM]
             <name> [<amount>]
 ```
 
@@ -99,8 +128,8 @@ daylog food --kcal N --protein N --carbs N --fat N
 ### `daylog note` — append to `## Notes`
 
 ```
-daylog note <text>
-daylog note <alias-key>
+daylog note [--date YYYY-MM-DD] [--time HH:MM] <text>
+daylog note [--date YYYY-MM-DD] [--time HH:MM] <alias-key>
 ```
 
 - `<text>` accepts multiple positional args, joined with spaces (no shell
@@ -116,23 +145,26 @@ daylog note <alias-key>
 ### `daylog bp` — write YAML + append to `## Vitals`
 
 ```
-daylog bp <sys> <dia> <pulse>
-daylog bp --morning <sys> <dia> <pulse>
-daylog bp --evening <sys> <dia> <pulse>
+daylog bp [--date YYYY-MM-DD] [--time HH:MM] <sys> <dia> <pulse>
+daylog bp --morning [--date YYYY-MM-DD] [--time HH:MM] <sys> <dia> <pulse>
+daylog bp --evening [--date YYYY-MM-DD] [--time HH:MM] <sys> <dia> <pulse>
 ```
 
-- **Auto slot:** `Local::now()` time-of-day before 14:00 = `morning`,
-  ≥ 14:00 = `evening`. The 14:00 cutoff is hard-coded; configurability is
-  out of scope for v1.
+- **Auto slot:** measurement time before 14:00 = `morning`, ≥ 14:00 =
+  `evening`. The measurement time is `--time` if given, else
+  `Local::now().time()`. The 14:00 cutoff is hard-coded; configurability
+  is out of scope for v1.
 - **`--morning` / `--evening`** are mutually exclusive flags that override
-  the auto choice (e.g., for retroactive logging in the same day).
+  the auto choice.
 - Writes three YAML scalars: `bp_<slot>_sys`, `bp_<slot>_dia`,
   `bp_<slot>_pulse`. Existing values for the chosen slot are overwritten.
   The other slot is left untouched.
 - Appends to `## Vitals`:
   ```
-  - **HH:MM** BP: <sys>/<dia>, pulse <pulse> (<slot>)
+  - **HH:MM** BP: <sys>/<dia>, pulse <pulse> bpm
   ```
+  No `(morning)`/`(evening)` suffix — it's derivable from the time prefix
+  and the cutoff, and the slot is already authoritative in YAML.
 - Re-running same slot in the same day: YAML scalars are overwritten in
   place; `## Vitals` gets a new line appended each time, preserving a
   chronological history in the body.
@@ -345,7 +377,7 @@ bp_morning_pulse: 70
 - **12:42** ...
 
 ## Vitals
-- **07:30** BP: 141/96, pulse 70 (morning)
+- **07:30** BP: 141/96, pulse 70 bpm
 
 ## Notes
 - **08:30** Woke up
@@ -381,6 +413,30 @@ No `--ii` given → II omitted from glycemic segment:
 - **HH:MM** Random pasta dish (500g) (350 kcal, 7.0g protein, 24.0g carbs, 25.0g fat) | GI ~50, GL ~12.0
 ```
 
+### `daylog note --date 2026-04-29 --time 22:30 "Aritonin"` (retroactive)
+
+Both flags resolve directly: target file is `2026-04-29.md` (not today),
+time prefix is the parsed `--time` value:
+
+```markdown
+## Notes
+- **22:30** Aritonin
+```
+
+Useful when catching up the next morning, or when day_start_hour didn't
+catch a late-night entry.
+
+### `daylog bp --time 08:00 141 96 70` at 14:30 (retroactive morning)
+
+Slot detection uses the `--time` value (08:00), not `Local::now()`. So
+this writes `bp_morning_*` even though it's actually 14:30 when the
+command runs:
+
+```markdown
+## Vitals
+- **08:00** BP: 141/96, pulse 70 bpm
+```
+
 ## Error handling matrix
 
 | Situation | Behavior |
@@ -405,6 +461,10 @@ No `--ii` given → II omitted from glycemic segment:
 | Section already exists | `ensure_section` is a no-op; append works |
 | Section heading variant (`##  Food`, `### Food`) | Strict match misses → duplicate inserted (acknowledged) |
 | Concurrent watcher reading mid-write | No issue — `atomic_write` is rename-into-place |
+| `--date 2026-13-45` (invalid) | Parse error: `"Invalid --date: '<x>'. Expected YYYY-MM-DD."` |
+| `--date 2099-01-01` (far future) | Allowed — daylog doesn't gate on plausibility; user takes responsibility |
+| `--time 25:00` (invalid) | Parse error: `"Invalid --time: '<x>'. Expected HH:MM (24h) or H:MMam/pm (12h)."` (mirrors sleep-cmd) |
+| `--time` and `--date` together targeting a different day | Both honored — entry written to `--date`'s note with `--time`'s prefix |
 
 ## CLI definition
 
@@ -426,9 +486,15 @@ Food {
     #[arg(long)] gi: Option<f64>,
     #[arg(long)] gl: Option<f64>,
     #[arg(long)] ii: Option<f64>,
+    /// Override target date (YYYY-MM-DD). Default: effective_today.
+    #[arg(long)] date: Option<String>,
+    /// Override entry time (HH:MM 24h or H:MMam/pm 12h). Default: now.
+    #[arg(long)] time: Option<String>,
 },
 /// Log a note to today's `## Notes` section
 Note {
+    #[arg(long)] date: Option<String>,
+    #[arg(long)] time: Option<String>,
     /// Note text or config alias key (joined — no shell quoting needed)
     #[arg(trailing_var_arg = true)]
     text: Vec<String>,
@@ -442,6 +508,8 @@ Bp {
     morning: bool,
     #[arg(long)]
     evening: bool,
+    #[arg(long)] date: Option<String>,
+    #[arg(long)] time: Option<String>,
 },
 ```
 
@@ -489,6 +557,10 @@ independently optional in both modes.
 - `output_uses_time_format_12h` / `output_uses_time_format_24h`
 - `db_missing_lookup_mode_errors_with_init_suggestion`
 - `db_missing_custom_mode_works_without_db`
+- `flag_date_writes_to_named_day_not_today`
+- `flag_time_overrides_now_for_prefix`
+- `flag_date_invalid_format_errors`
+- `flag_time_invalid_format_errors`
 
 ### `note_cmd.rs`
 
@@ -497,6 +569,7 @@ independently optional in both modes.
 - `note_alias_falls_through_when_key_not_found_treats_as_literal`
 - `note_empty_text_errors`
 - `note_creates_section_if_missing`
+- `note_flag_date_writes_to_named_day` / `note_flag_time_overrides_now`
 
 ### `bp_cmd.rs`
 
@@ -504,13 +577,16 @@ independently optional in both modes.
 - `bp_auto_evening_at_14` (boundary: 14:00 → evening)
 - `bp_explicit_evening_overrides_time`
 - `bp_writes_three_yaml_fields`
-- `bp_appends_vitals_line_with_slot_suffix`
+- `bp_appends_vitals_line_with_bpm_unit`
 - `bp_rerun_morning_overwrites_yaml_appends_vitals` (YAML overwritten,
   body line appended)
 - `bp_creates_vitals_section_if_missing`
 - `bp_validates_numeric`
 - `bp_warns_out_of_range_but_still_writes`
 - `bp_atomic_write_yaml_and_body_in_one_pass` (single mtime change)
+- `bp_slot_uses_time_flag_when_given` — `--time 08:00` at 14:30 → morning
+- `bp_flag_date_writes_to_named_day`
+- `bp_no_morning_evening_suffix_in_vitals_line`
 
 ### Integration
 
@@ -546,6 +622,3 @@ independently optional in both modes.
   pattern as `daylog log`.
 - Auto-cleanup of duplicate Vitals lines from re-running same slot.
   Chronological accumulation in body is the intended behavior.
-- Retroactive logging via `--time HH:MM` on any of the three commands.
-  Time prefix is always `Local::now()` in v1; if logging-after-the-fact
-  becomes a frequent need, add a `--time` flag in a follow-up.
