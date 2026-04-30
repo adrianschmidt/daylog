@@ -356,7 +356,9 @@ pub fn execute(
         render_custom(name, amt, custom)
     } else {
         let lookup = lookup_food(config, name)?;
-        render_lookup(&lookup, amt)?
+        let mut entry = render_lookup(&lookup, amt)?;
+        apply_glycemic_overrides(&mut entry, gi, gl, ii);
+        entry
     };
 
     let line = format_line(&entry, &formatted_time);
@@ -407,6 +409,34 @@ fn missing_macros_err() -> color_eyre::eyre::Report {
         "Custom mode requires --kcal, --protein, --carbs, and --fat together. \
          Optional flags: --gi, --gl, --ii."
     )
+}
+
+/// Apply explicit --gi / --gl / --ii overrides to a RenderedEntry from
+/// lookup mode. If --gi changes the gi value and --gl was not given,
+/// re-runs the GL auto-compute cascade with the new gi.
+fn apply_glycemic_overrides(
+    entry: &mut RenderedEntry,
+    gi: Option<f64>,
+    gl: Option<f64>,
+    ii: Option<f64>,
+) {
+    if let Some(v) = gi {
+        entry.gi = Some(v);
+    }
+    if let Some(v) = ii {
+        entry.ii = Some(v);
+    }
+    if let Some(v) = gl {
+        entry.gl = Some(v);
+    } else if gi.is_some() {
+        // --gi overrode gi; re-apply auto-compute when GL has no
+        // explicit override. This ensures GL reflects the new gi.
+        if let Some(carbs) = entry.carbs {
+            if let Some(new_gi) = entry.gi {
+                entry.gl = Some(new_gi * carbs / 100.0);
+            }
+        }
+    }
 }
 
 fn lookup_food(config: &Config, name: &str) -> Result<FoodLookup> {
@@ -936,5 +966,116 @@ mod tests {
         let path = dir.path().join("2026-04-29.md");
         let note = std::fs::read_to_string(&path).unwrap();
         assert!(note.contains("- **22:00** Custom item"));
+    }
+
+    #[test]
+    fn execute_lookup_with_gi_override_replaces_gi() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let config = config_in(dir.path());
+        populate_db(&config);
+
+        execute(
+            "kelda skogssvampsoppa",
+            Some("500g"),
+            None,
+            None,
+            None,
+            None,
+            Some(45.0), // --gi override (DB has 40)
+            None,
+            None,
+            None,
+            Some("12:42"),
+            &config,
+        )
+        .unwrap();
+
+        let note = read_today(dir.path(), &config);
+        assert!(note.contains("GI ~45"), "expected --gi override:\n{note}");
+        assert!(!note.contains("GI ~40"), "DB gi should not appear:\n{note}");
+    }
+
+    #[test]
+    fn execute_lookup_with_gi_override_recomputes_gl_when_no_gl_flag() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let config = config_in(dir.path());
+        populate_db(&config);
+
+        // 500g of kelda has carbs = 24g. With --gi 50 and no --gl,
+        // GL should auto-compute to 50 * 24 / 100 = 12.0.
+        execute(
+            "kelda skogssvampsoppa",
+            Some("500g"),
+            None,
+            None,
+            None,
+            None,
+            Some(50.0), // --gi
+            None,       // no --gl
+            None,
+            None,
+            Some("12:42"),
+            &config,
+        )
+        .unwrap();
+
+        let note = read_today(dir.path(), &config);
+        assert!(
+            note.contains("GL ~12.0"),
+            "expected auto-compute from new gi:\n{note}"
+        );
+    }
+
+    #[test]
+    fn execute_lookup_with_gl_override_replaces_gl() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let config = config_in(dir.path());
+        populate_db(&config);
+
+        execute(
+            "kelda skogssvampsoppa",
+            Some("500g"),
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(99.9), // --gl override
+            None,
+            None,
+            Some("12:42"),
+            &config,
+        )
+        .unwrap();
+
+        let note = read_today(dir.path(), &config);
+        assert!(note.contains("GL ~99.9"), "expected --gl override:\n{note}");
+    }
+
+    #[test]
+    fn execute_lookup_with_ii_override_replaces_ii() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let config = config_in(dir.path());
+        populate_db(&config);
+
+        execute(
+            "kelda skogssvampsoppa",
+            Some("500g"),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(99.0), // --ii override
+            None,
+            Some("12:42"),
+            &config,
+        )
+        .unwrap();
+
+        let note = read_today(dir.path(), &config);
+        assert!(note.contains("II ~99"), "expected --ii override:\n{note}");
+        assert!(!note.contains("II ~35"), "DB ii should not appear:\n{note}");
     }
 }
