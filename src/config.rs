@@ -63,6 +63,8 @@ pub struct Config {
     pub exercises: HashMap<String, ExerciseConfig>,
     #[serde(default)]
     pub metrics: HashMap<String, MetricConfig>,
+    #[serde(default)]
+    pub notes: NotesConfig,
     #[serde(default = "default_toml_table")]
     pub climbing: toml::Value,
 }
@@ -89,6 +91,12 @@ pub struct ModulesConfig {
     pub trends: bool,
     #[serde(default)]
     pub climbing: bool,
+}
+
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct NotesConfig {
+    #[serde(default)]
+    pub aliases: HashMap<String, String>,
 }
 
 fn default_true() -> bool {
@@ -467,5 +475,31 @@ mod tests {
     fn test_time_format_display() {
         assert_eq!(TimeFormat::TwelveHour.to_string(), "12h");
         assert_eq!(TimeFormat::TwentyFourHour.to_string(), "24h");
+    }
+
+    #[test]
+    fn parses_notes_aliases() {
+        let toml_str = r#"
+notes_dir = '/tmp/test'
+
+[notes.aliases]
+med-morning = "Morning meds"
+med-evening = "Evening meds"
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        assert_eq!(
+            config.notes.aliases.get("med-morning").map(String::as_str),
+            Some("Morning meds")
+        );
+        assert_eq!(
+            config.notes.aliases.get("med-evening").map(String::as_str),
+            Some("Evening meds")
+        );
+    }
+
+    #[test]
+    fn notes_aliases_default_empty() {
+        let config: Config = toml::from_str("notes_dir = '/tmp/test'\n").unwrap();
+        assert!(config.notes.aliases.is_empty());
     }
 }
