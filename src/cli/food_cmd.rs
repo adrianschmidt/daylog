@@ -323,25 +323,115 @@ fn round_glycemic_one_decimal(v: f64) -> String {
 
 #[allow(clippy::too_many_arguments)]
 pub fn execute(
-    _name: &str,
-    _amount: Option<&str>,
-    _kcal: Option<f64>,
-    _protein: Option<f64>,
-    _carbs: Option<f64>,
-    _fat: Option<f64>,
-    _gi: Option<f64>,
-    _gl: Option<f64>,
-    _ii: Option<f64>,
-    _date: Option<&str>,
-    _time: Option<&str>,
-    _config: &Config,
+    name: &str,
+    amount: Option<&str>,
+    kcal: Option<f64>,
+    protein: Option<f64>,
+    carbs: Option<f64>,
+    fat: Option<f64>,
+    gi: Option<f64>,
+    gl: Option<f64>,
+    ii: Option<f64>,
+    date_flag: Option<&str>,
+    time_flag: Option<&str>,
+    config: &Config,
 ) -> Result<()> {
-    bail!("daylog food: amount parsing only — full implementation in next task")
+    if name.trim().is_empty() {
+        bail!("Food name required.");
+    }
+
+    let amt = match amount {
+        Some(s) => Some(parse_amount(s)?),
+        None => None,
+    };
+
+    let date = crate::cli::resolve::target_date(date_flag, config)?;
+    let date_str = date.format("%Y-%m-%d").to_string();
+    let when = crate::cli::resolve::target_time(time_flag)?;
+    let formatted_time = crate::time::format_time(when, config.time_format);
+
+    let any_macro = kcal.is_some() || protein.is_some() || carbs.is_some() || fat.is_some();
+    let entry = if any_macro {
+        let custom = require_custom_complete(kcal, protein, carbs, fat, gi, gl, ii)?;
+        render_custom(name, amt, custom)
+    } else {
+        let lookup = lookup_food(config, name)?;
+        render_lookup(&lookup, amt)?
+    };
+
+    let line = format_line(&entry, &formatted_time);
+
+    let note_path = config.notes_dir_path().join(format!("{date_str}.md"));
+    let content = if note_path.exists() {
+        std::fs::read_to_string(&note_path)?
+    } else {
+        crate::template::render_daily_note(&date_str, config)
+    };
+    let updated = crate::body::ensure_section(&content, "Food");
+    let updated = crate::body::append_line_to_section(&updated, "Food", &line);
+    crate::frontmatter::atomic_write(&note_path, &updated)?;
+
+    eprintln!(
+        "Food logged: {date_str} {formatted_time} {}",
+        entry.display_name
+    );
+    Ok(())
+}
+
+fn require_custom_complete(
+    kcal: Option<f64>,
+    protein: Option<f64>,
+    carbs: Option<f64>,
+    fat: Option<f64>,
+    gi: Option<f64>,
+    gl: Option<f64>,
+    ii: Option<f64>,
+) -> Result<CustomNutrients> {
+    let kcal = kcal.ok_or_else(missing_macros_err)?;
+    let protein = protein.ok_or_else(missing_macros_err)?;
+    let carbs = carbs.ok_or_else(missing_macros_err)?;
+    let fat = fat.ok_or_else(missing_macros_err)?;
+    Ok(CustomNutrients {
+        kcal,
+        protein,
+        carbs,
+        fat,
+        gi,
+        gl,
+        ii,
+    })
+}
+
+fn missing_macros_err() -> color_eyre::eyre::Report {
+    color_eyre::eyre::eyre!(
+        "Custom mode requires --kcal, --protein, --carbs, and --fat together. \
+         Optional flags: --gi, --gl, --ii."
+    )
+}
+
+fn lookup_food(config: &Config, name: &str) -> Result<FoodLookup> {
+    let db_path = config.db_path();
+    if !db_path.exists() {
+        return Err(color_eyre::eyre::eyre!(
+            "Database not found at {}. Run 'daylog init' or 'daylog sync' first, \
+             or pass --kcal/--protein/--carbs/--fat for a one-off entry.",
+            db_path.display()
+        ));
+    }
+
+    let conn = crate::db::open_ro(&db_path)?;
+    crate::db::lookup_food_by_name_or_alias(&conn, name)?.ok_or_else(|| {
+        color_eyre::eyre::eyre!(
+            "No nutrition entry for '{name}'. Add it to nutrition-db.md, \
+             use a known alias, or pass --kcal/--protein/--carbs/--fat for a one-off."
+        )
+    })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::db;
     use crate::db::{FoodLookup, NutrientPanel, TotalPanel};
 
     fn lookup_per_100g() -> FoodLookup {
@@ -646,5 +736,205 @@ mod tests {
             Some(4.0),
             "expected per_100g GL to be used in density-bridge"
         );
+    }
+
+    fn config_in(notes_dir: &std::path::Path) -> Config {
+        let toml_str = format!(
+            "notes_dir = '{}'\ntime_format = '24h'\n",
+            notes_dir.display().to_string().replace('\\', "/")
+        );
+        toml::from_str(&toml_str).unwrap()
+    }
+
+    fn read_today(notes_dir: &std::path::Path, config: &Config) -> String {
+        let date = config.effective_today();
+        std::fs::read_to_string(notes_dir.join(format!("{date}.md"))).unwrap()
+    }
+
+    fn populate_db(config: &Config) {
+        let db_path = config.db_path();
+        let conn = db::open_rw(&db_path).unwrap();
+        db::init_db(&conn, &[]).unwrap();
+        db::insert_food(
+            &conn,
+            &db::FoodInsert {
+                name: "Kelda Skogssvampsoppa".into(),
+                per_100g: Some(NutrientPanel {
+                    kcal: Some(70.0),
+                    protein: Some(1.4),
+                    carbs: Some(4.8),
+                    fat: Some(5.0),
+                    sat_fat: None,
+                    sugar: None,
+                    salt: None,
+                    fiber: None,
+                }),
+                per_100ml: None,
+                density_g_per_ml: None,
+                total: None,
+                gi: Some(40.0),
+                gl_per_100g: Some(2.0),
+                gl_per_100ml: None,
+                ii: Some(35.0),
+                description: None,
+                notes: None,
+                aliases: vec!["kelda skogssvampsoppa".into()],
+                ingredients: vec![],
+            },
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn execute_lookup_writes_food_section_and_line() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let config = config_in(dir.path());
+        populate_db(&config);
+
+        execute(
+            "kelda skogssvampsoppa",
+            Some("500g"),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some("12:42"),
+            &config,
+        )
+        .unwrap();
+
+        let note = read_today(dir.path(), &config);
+        assert!(note.contains("## Food"), "got:\n{note}");
+        assert!(
+            note.contains("- **12:42** Kelda Skogssvampsoppa (500g) (350 kcal, 7.0g protein, 24.0g carbs, 25.0g fat) | GI ~40, GL ~10.0, II ~35"),
+            "got:\n{note}"
+        );
+    }
+
+    #[test]
+    fn execute_custom_mode_works_without_db() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let config = config_in(dir.path());
+        // No populate_db — custom mode shouldn't need it.
+
+        execute(
+            "Random pasta",
+            Some("500g"),
+            Some(350.0),
+            Some(7.0),
+            Some(24.0),
+            Some(25.0),
+            Some(50.0),
+            None,
+            None,
+            None,
+            Some("13:00"),
+            &config,
+        )
+        .unwrap();
+
+        let note = read_today(dir.path(), &config);
+        assert!(note.contains("- **13:00** Random pasta (500g) (350 kcal, 7.0g protein, 24.0g carbs, 25.0g fat) | GI ~50, GL ~12.0"), "got:\n{note}");
+    }
+
+    #[test]
+    fn execute_custom_mode_partial_macros_errors() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let config = config_in(dir.path());
+
+        let err = execute(
+            "x",
+            Some("500g"),
+            Some(350.0),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some("13:00"),
+            &config,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("Custom mode requires"));
+    }
+
+    #[test]
+    fn execute_lookup_no_db_errors_with_suggestion() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let config = config_in(dir.path());
+
+        let err = execute(
+            "anything",
+            Some("500g"),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some("12:42"),
+            &config,
+        )
+        .unwrap_err();
+        let msg = err.to_string();
+        assert!(msg.contains("Database not found"), "got: {msg}");
+    }
+
+    #[test]
+    fn execute_lookup_unknown_name_errors() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let config = config_in(dir.path());
+        populate_db(&config);
+
+        let err = execute(
+            "ghost food",
+            Some("500g"),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some("12:42"),
+            &config,
+        )
+        .unwrap_err();
+        assert!(err.to_string().contains("No nutrition entry"));
+    }
+
+    #[test]
+    fn execute_date_flag_writes_to_named_day() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let config = config_in(dir.path());
+
+        execute(
+            "Custom item",
+            Some("500g"),
+            Some(350.0),
+            Some(7.0),
+            Some(24.0),
+            Some(25.0),
+            None,
+            None,
+            None,
+            Some("2026-04-29"),
+            Some("22:00"),
+            &config,
+        )
+        .unwrap();
+
+        let path = dir.path().join("2026-04-29.md");
+        let note = std::fs::read_to_string(&path).unwrap();
+        assert!(note.contains("- **22:00** Custom item"));
     }
 }
