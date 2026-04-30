@@ -135,3 +135,40 @@ pub enum Commands {
         time: Option<String>,
     },
 }
+
+/// Helpers shared by food/note/bp for resolving --date and --time flags
+/// and rendering the timestamp prefix per `config.time_format`.
+pub mod resolve {
+    use chrono::{Local, NaiveDate, NaiveTime};
+    use color_eyre::eyre::Result;
+    use color_eyre::Help;
+
+    use crate::config::Config;
+    use crate::time;
+
+    /// Resolve the target date for a logging command. `--date` overrides;
+    /// otherwise `config.effective_today_date()`.
+    pub fn target_date(flag: Option<&str>, config: &Config) -> Result<NaiveDate> {
+        match flag {
+            Some(s) => NaiveDate::parse_from_str(s.trim(), "%Y-%m-%d")
+                .map_err(|_| color_eyre::eyre::eyre!("Invalid --date: '{s}'. Expected YYYY-MM-DD."))
+                .suggestion("Use a date in YYYY-MM-DD form, e.g., 2026-04-30."),
+            None => Ok(config.effective_today_date()),
+        }
+    }
+
+    /// Resolve the timestamp for the `**HH:MM**` prefix and BP slot
+    /// detection. `--time` overrides; otherwise `Local::now().time()`.
+    pub fn target_time(flag: Option<&str>) -> Result<NaiveTime> {
+        match flag {
+            Some(s) => time::parse_time(s)
+                .ok_or_else(|| {
+                    color_eyre::eyre::eyre!(
+                        "Invalid --time: '{s}'. Expected HH:MM (24h) or H:MMam/pm (12h)."
+                    )
+                })
+                .suggestion("Examples: 22:30, 07:05, 10:30pm, 6:15am."),
+            None => Ok(Local::now().time()),
+        }
+    }
+}
