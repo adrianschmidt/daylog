@@ -206,6 +206,7 @@ daylog is designed for AI agents:
 - SQLite DB is directly queryable for complex questions
 - Ships with a Claude Code skill for seamless integration
 - `AGENTS.md` documents the full AI interface
+- `daylog readme` prints the README embedded in the binary, so an agent that only has the installed binary can still discover the full convention without network access or a separate clone
 
 ## Nutrition database
 

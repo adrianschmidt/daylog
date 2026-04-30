@@ -3,6 +3,7 @@ pub mod completions;
 pub mod food_cmd;
 pub mod log_cmd;
 pub mod note_cmd;
+pub mod readme_cmd;
 pub mod sleep_cmd;
 
 use clap::{Parser, Subcommand};
@@ -54,6 +55,8 @@ pub enum Commands {
         /// Shell to generate completions for
         shell: Shell,
     },
+    /// Print the embedded README to stdout (compiled into the binary)
+    Readme,
     /// Record bedtime (uses now, or pass a time)
     ///
     /// Stores the pending bedtime in `.daylog-state.toml` next to the DB.
