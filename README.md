@@ -112,12 +112,12 @@ auto-inserting the section if it's missing.
 
 ```bash
 # Food — nutrition-db lookup with gram or ml amount
-daylog food "kelda skogssvampsoppa" 500g
-daylog food "helmjölk" 250ml
+daylog food "tomato soup" 500g
+daylog food "whole milk" 250ml
 
 # Food — total-panel foods need no amount
-daylog food te
-daylog food proteinshake
+daylog food tea
+daylog food protein-shake
 
 # Food — one-off custom item, all four macros required together;
 # --gi / --gl / --ii independently optional. GL auto-computes when
@@ -126,7 +126,7 @@ daylog food --kcal 350 --protein 7 --carbs 24 --fat 25 \
             --gi 50 "Random pasta dish" 500g
 
 # Note — literal text or a [notes.aliases] key
-daylog note "Attentin 10mg"
+daylog note "Adderall 10mg"
 daylog note med-morning
 
 # BP — sys dia pulse; auto-picks bp_morning_* or bp_evening_*
@@ -137,7 +137,7 @@ daylog bp --evening 133 73 62
 
 # Shared flags: --date YYYY-MM-DD and --time HH:MM (or H:MMam/pm)
 # for retroactive entries.
-daylog note --date 2026-04-29 --time 23:30 "Aritonin"
+daylog note --date 2026-04-29 --time 23:30 "Allegra 10mg"
 daylog bp --time 08:00 141 96 70   # logged at 14:30 — still morning
 ```
 
@@ -146,7 +146,7 @@ longer note text:
 
 ```toml
 [notes.aliases]
-med-morning = "Morgonmedicin (Elvanse 70mg, Escitalopram 20mg, Losartan/Hydro 100/12.5mg, Vialerg 10mg)"
+med-morning = "Morning meds (Vyvanse 70mg, Lexapro 20mg, Losartan/HCTZ 100/12.5mg, Allegra 10mg)"
 ```
 
 These commands write the markdown only; the watcher re-materializes
@@ -215,7 +215,7 @@ Daylog reads `{notes_dir}/nutrition-db.md` (if present) and materializes it into
 Each entry is one `## Heading` followed by a fenced ` ```yaml ` block. Freeform prose under the block is preserved as `notes`.
 
 `````markdown
-## Kelda Skogssvampsoppa
+## Tomato Soup
 
 ```yaml
 per_100g:
@@ -226,15 +226,15 @@ per_100g:
 gi: 40
 gl_per_100g: 2
 ii: 35
-aliases: [skogssvampsoppa]
+aliases: [tomato-soup]
 ```
 
-Innehåller svamp + grädde — IBS-trigger.
+Contains tomatoes — high acidity, sometimes triggers reflux.
 
-## proteinshake
+## protein-shake
 
 ```yaml
-description: 62g pulver + 4 dl vatten
+description: 62g powder + 400ml water
 total:
   weight_g: 462
   kcal: 234
@@ -259,13 +259,13 @@ At least one of `per_100g`, `per_100ml`, or `total` must be present. Everything 
 | `gl_per_100g` / `gl_per_100ml` | Glycemic load |
 | `ii` | Insulin index |
 | `aliases` | Lowercased lookup names. The heading is auto-added. |
-| `description` | Free-text composition (e.g. "62g pulver + 4 dl vatten") |
+| `description` | Free-text composition (e.g. "62g powder + 400ml water") |
 | `ingredients` | List of `{food, amount_g}` for composite recipes |
 | `total` | Composite recipe totals (`weight_g`, `kcal`, ... ) |
 
 ### Convention: raw vs. cooked
 
-When a food has materially different nutritional values raw vs. cooked (chicken, lentils, ground meat), record one entry per state, named distinctly: `Kycklingbiffar (rå)` and `Kycklingbiffar (stekt)`. The schema stores one panel per row; multi-state foods are split.
+When a food has materially different nutritional values raw vs. cooked (chicken, lentils, ground meat), record one entry per state, named distinctly: `Chicken Patties (raw)` and `Chicken Patties (cooked)`. The schema stores one panel per row; multi-state foods are split.
 
 ### Watcher and rebuild
 
