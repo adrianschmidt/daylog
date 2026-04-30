@@ -362,3 +362,105 @@ fn status_json_includes_nutrition_db() {
     assert_eq!(status.foods_count, 1);
     assert!(status.last_synced.is_some());
 }
+
+/// End-to-end: run food + bp + note on a fresh today's note and verify
+/// the resulting markdown has all three sections in canonical order
+/// with their respective entries.
+#[test]
+fn test_food_note_bp_full_day() {
+    use daylog::db::{FoodInsert, NutrientPanel};
+
+    let dir = tempfile::TempDir::new().unwrap();
+    let notes_dir = dir.path().to_path_buf();
+    let notes_dir_str = notes_dir.display().to_string().replace('\\', "/");
+    let toml_str = format!(
+        r#"
+notes_dir = "{notes_dir_str}"
+time_format = "24h"
+
+[modules]
+dashboard = true
+training = true
+trends = true
+climbing = false
+"#
+    );
+    let config: daylog::config::Config = toml::from_str(&toml_str).unwrap();
+    let registry = modules::build_registry(&config);
+    let _conn = setup_db(&config, &registry);
+
+    // Seed the nutrition DB with one entry for the food lookup.
+    let conn = db::open_rw(&config.db_path()).unwrap();
+    db::insert_food(
+        &conn,
+        &FoodInsert {
+            name: "Kelda Skogssvampsoppa".into(),
+            per_100g: Some(NutrientPanel {
+                kcal: Some(70.0),
+                protein: Some(1.4),
+                carbs: Some(4.8),
+                fat: Some(5.0),
+                sat_fat: None,
+                sugar: None,
+                salt: None,
+                fiber: None,
+            }),
+            per_100ml: None,
+            density_g_per_ml: None,
+            total: None,
+            gi: Some(40.0),
+            gl_per_100g: Some(2.0),
+            gl_per_100ml: None,
+            ii: Some(35.0),
+            description: None,
+            notes: None,
+            aliases: vec!["kelda skogssvampsoppa".into()],
+            ingredients: vec![],
+        },
+    )
+    .unwrap();
+    drop(conn);
+
+    daylog::cli::bp_cmd::execute(141, 96, 70, false, false, None, Some("07:30"), &config).unwrap();
+    daylog::cli::food_cmd::execute(
+        "kelda skogssvampsoppa",
+        Some("500g"),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        Some("12:42"),
+        &config,
+    )
+    .unwrap();
+    daylog::cli::note_cmd::execute(
+        &["Attentin".into(), "10mg".into()],
+        None,
+        Some("13:00"),
+        &config,
+    )
+    .unwrap();
+
+    let date = config.effective_today();
+    let note = std::fs::read_to_string(dir.path().join(format!("{date}.md"))).unwrap();
+
+    // YAML scalars from BP.
+    assert!(note.contains("bp_morning_sys: 141"), "got:\n{note}");
+    assert!(note.contains("bp_morning_dia: 96"));
+    assert!(note.contains("bp_morning_pulse: 70"));
+
+    // Sections in canonical order.
+    let food = note.find("## Food").expect("## Food");
+    let vitals = note.find("## Vitals").expect("## Vitals");
+    let notes_h = note.find("## Notes").expect("## Notes");
+    assert!(food < vitals && vitals < notes_h, "wrong order:\n{note}");
+
+    // Each section has its line.
+    assert!(note.contains("- **07:30** BP: 141/96, pulse 70 bpm"));
+    assert!(note.contains("- **12:42** Kelda Skogssvampsoppa (500g)"));
+    assert!(note.contains("- **13:00** Attentin 10mg"));
+}
