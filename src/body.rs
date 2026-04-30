@@ -39,7 +39,7 @@ pub fn ensure_section(content: &str, section: &str) -> String {
             out.push(format!("## {section}"));
             out.push(String::new());
             out.extend(body_lines.iter().skip(idx).map(|s| s.to_string()));
-            join_with_trailing_newline(&out, body)
+            join_with_trailing_newline(&out)
         }
         None => {
             let mut out: Vec<String> = body_lines.iter().map(|s| s.to_string()).collect();
@@ -54,7 +54,7 @@ pub fn ensure_section(content: &str, section: &str) -> String {
             }
             out.push(format!("## {section}"));
             out.push(String::new());
-            join_with_trailing_newline(&out, body)
+            join_with_trailing_newline(&out)
         }
     };
 
@@ -96,12 +96,62 @@ fn canonical_position(section: &str) -> usize {
         .unwrap_or(usize::MAX)
 }
 
-fn join_with_trailing_newline(lines: &[String], original_body: &str) -> String {
+fn join_with_trailing_newline(lines: &[String]) -> String {
     let mut s = lines.join("\n");
-    if original_body.ends_with('\n') || !lines.is_empty() {
+    if !lines.is_empty() {
         s.push('\n');
     }
     s
+}
+
+/// Append `<line>` to the named section's body. The caller must call
+/// `ensure_section` first; if the section is missing this function
+/// returns content unchanged.
+pub fn append_line_to_section(content: &str, section: &str, line: &str) -> String {
+    let (header, body) = split_at_body(content);
+    let body_lines: Vec<&str> = body.lines().collect();
+
+    let heading_idx = match body_lines
+        .iter()
+        .position(|l| parse_h2_heading(l).map(|n| n == section).unwrap_or(false))
+    {
+        Some(i) => i,
+        None => return content.to_string(),
+    };
+
+    // End-of-section: index of the next ## heading, or len if none.
+    let next_idx = body_lines
+        .iter()
+        .enumerate()
+        .skip(heading_idx + 1)
+        .find_map(|(i, l)| parse_h2_heading(l).map(|_| i))
+        .unwrap_or(body_lines.len());
+
+    // Walk back from `next_idx - 1` skipping blank lines to find the
+    // last non-blank line in the section.
+    let mut insert_after = heading_idx;
+    for i in (heading_idx + 1..next_idx).rev() {
+        if !body_lines[i].is_empty() {
+            insert_after = i;
+            break;
+        }
+    }
+
+    let mut out: Vec<String> = body_lines
+        .iter()
+        .take(insert_after + 1)
+        .map(|s| s.to_string())
+        .collect();
+    out.push(line.to_string());
+    out.extend(
+        body_lines
+            .iter()
+            .skip(insert_after + 1)
+            .map(|s| s.to_string()),
+    );
+
+    let new_body = join_with_trailing_newline(&out);
+    format!("{header}{new_body}")
 }
 
 #[cfg(test)]
@@ -168,5 +218,59 @@ mod tests {
     fn ensure_section_preserves_frontmatter_exactly() {
         let result = ensure_section(ONLY_NOTES, "Food");
         assert!(result.starts_with("---\ndate: 2026-04-30\n---\n"));
+    }
+
+    #[test]
+    fn append_into_existing_empty_section() {
+        let content = "---\ndate: 2026-04-30\n---\n\n## Food\n\n## Notes\n\n";
+        let result = append_line_to_section(content, "Food", "- **12:42** Tea");
+        assert!(result.contains("## Food\n- **12:42** Tea"));
+        assert!(result.contains("## Notes"));
+    }
+
+    #[test]
+    fn append_after_existing_items() {
+        let content = "---\ndate: 2026-04-30\n---\n\n## Food\n- **08:30** Coffee\n\n## Notes\n\n";
+        let result = append_line_to_section(content, "Food", "- **12:42** Tea");
+        let coffee_idx = result.find("- **08:30** Coffee").unwrap();
+        let tea_idx = result.find("- **12:42** Tea").unwrap();
+        assert!(coffee_idx < tea_idx);
+        // Coffee must still be there.
+        assert_eq!(result.matches("- **08:30** Coffee").count(), 1);
+    }
+
+    #[test]
+    fn append_skips_trailing_blank_lines_within_section() {
+        // Section content is followed by blank lines, then next heading.
+        let content = "---\nx: 1\n---\n\n## Food\n- **08:30** A\n\n## Notes\n\n";
+        let result = append_line_to_section(content, "Food", "- **09:00** B");
+        // New line lands between A and the blank+next heading.
+        let a_idx = result.find("- **08:30** A").unwrap();
+        let b_idx = result.find("- **09:00** B").unwrap();
+        let notes_idx = result.find("## Notes").unwrap();
+        assert!(a_idx < b_idx && b_idx < notes_idx);
+    }
+
+    #[test]
+    fn append_to_section_at_end_of_file() {
+        let content = "---\ndate: 2026-04-30\n---\n\n## Food\n\n";
+        let result = append_line_to_section(content, "Food", "- **12:42** Tea");
+        assert!(result.contains("## Food\n- **12:42** Tea"));
+    }
+
+    #[test]
+    fn append_preserves_subsequent_section() {
+        let content =
+            "---\nx: 1\n---\n\n## Food\n- **08:30** A\n\n## Notes\n- **09:00** Slept well\n";
+        let result = append_line_to_section(content, "Food", "- **12:42** Tea");
+        assert!(result.contains("- **09:00** Slept well"));
+        assert!(result.contains("- **12:42** Tea"));
+    }
+
+    #[test]
+    fn append_to_missing_section_is_no_op() {
+        let content = "---\ndate: 2026-04-30\n---\n\n## Notes\n\n";
+        let result = append_line_to_section(content, "Food", "- **12:42** Tea");
+        assert_eq!(result, content);
     }
 }
