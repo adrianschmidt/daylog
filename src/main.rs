@@ -24,6 +24,31 @@ fn main() -> Result<()> {
         }
         Some(Commands::SleepStart { time }) => cmd_sleep_start(time.as_deref()),
         Some(Commands::SleepEnd { time }) => cmd_sleep_end(time.as_deref()),
+        Some(Commands::Food {
+            name,
+            amount,
+            kcal,
+            protein,
+            carbs,
+            fat,
+            gi,
+            gl,
+            ii,
+            date,
+            time,
+        }) => cmd_food(
+            name, amount, kcal, protein, carbs, fat, gi, gl, ii, date, time,
+        ),
+        Some(Commands::Note { text, date, time }) => cmd_note(text, date, time),
+        Some(Commands::Bp {
+            sys,
+            dia,
+            pulse,
+            morning,
+            evening,
+            date,
+            time,
+        }) => cmd_bp(sys, dia, pulse, morning, evening, date, time),
         None => cmd_run(),
     }
 }
@@ -270,4 +295,62 @@ fn cmd_rebuild() -> Result<()> {
 
 fn cmd_run() -> Result<()> {
     daylog::app::run()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn cmd_food(
+    name: String,
+    amount: Option<String>,
+    kcal: Option<f64>,
+    protein: Option<f64>,
+    carbs: Option<f64>,
+    fat: Option<f64>,
+    gi: Option<f64>,
+    gl: Option<f64>,
+    ii: Option<f64>,
+    date: Option<String>,
+    time: Option<String>,
+) -> Result<()> {
+    let config = Config::load()?;
+    daylog::cli::food_cmd::execute(
+        &name,
+        amount.as_deref(),
+        kcal,
+        protein,
+        carbs,
+        fat,
+        gi,
+        gl,
+        ii,
+        date.as_deref(),
+        time.as_deref(),
+        &config,
+    )
+}
+
+fn cmd_note(text: Vec<String>, date: Option<String>, time: Option<String>) -> Result<()> {
+    let config = Config::load()?;
+    daylog::cli::note_cmd::execute(&text, date.as_deref(), time.as_deref(), &config)
+}
+
+fn cmd_bp(
+    sys: i32,
+    dia: i32,
+    pulse: i32,
+    morning: bool,
+    evening: bool,
+    date: Option<String>,
+    time: Option<String>,
+) -> Result<()> {
+    let config = Config::load()?;
+    daylog::cli::bp_cmd::execute(
+        sys,
+        dia,
+        pulse,
+        morning,
+        evening,
+        date.as_deref(),
+        time.as_deref(),
+        &config,
+    )
 }
