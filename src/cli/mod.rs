@@ -1,5 +1,8 @@
+pub mod bp_cmd;
 pub mod completions;
+pub mod food_cmd;
 pub mod log_cmd;
+pub mod note_cmd;
 pub mod sleep_cmd;
 
 use clap::{Parser, Subcommand};
@@ -75,6 +78,60 @@ pub enum Commands {
     /// (`12h` or `24h`); the database always stores canonical 24h.
     SleepEnd {
         /// Wake time in HH:MM (24h) or H:MMam/pm (12h)
+        time: Option<String>,
+    },
+    /// Log a food entry to the day's `## Food` section
+    Food {
+        /// Name (literal or nutrition-db alias)
+        name: String,
+        /// Amount with optional unit (e.g., 500g, 250ml). Required for
+        /// per_100g/per_100ml entries; optional for total-panel entries.
+        amount: Option<String>,
+        /// Custom kcal value (skips nutrition-db lookup; requires
+        /// --protein, --carbs, --fat to also be set)
+        #[arg(long)]
+        kcal: Option<f64>,
+        #[arg(long)]
+        protein: Option<f64>,
+        #[arg(long)]
+        carbs: Option<f64>,
+        #[arg(long)]
+        fat: Option<f64>,
+        #[arg(long)]
+        gi: Option<f64>,
+        #[arg(long)]
+        gl: Option<f64>,
+        #[arg(long)]
+        ii: Option<f64>,
+        /// Override target date (YYYY-MM-DD). Default: effective_today.
+        #[arg(long)]
+        date: Option<String>,
+        /// Override entry time (HH:MM 24h or H:MMam/pm 12h). Default: now.
+        #[arg(long)]
+        time: Option<String>,
+    },
+    /// Log a free-text note to the day's `## Notes` section
+    Note {
+        #[arg(long)]
+        date: Option<String>,
+        #[arg(long)]
+        time: Option<String>,
+        /// Note text or [notes.aliases] key (joined; no shell quoting needed)
+        #[arg(trailing_var_arg = true)]
+        text: Vec<String>,
+    },
+    /// Log a blood pressure reading (YAML + `## Vitals` line)
+    Bp {
+        sys: i32,
+        dia: i32,
+        pulse: i32,
+        #[arg(long, conflicts_with = "evening")]
+        morning: bool,
+        #[arg(long)]
+        evening: bool,
+        #[arg(long)]
+        date: Option<String>,
+        #[arg(long)]
         time: Option<String>,
     },
 }
