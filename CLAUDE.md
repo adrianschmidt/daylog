@@ -47,10 +47,16 @@ src/
     nutrition.rs       nutrition-db.md parser (## headings + fenced YAML), foods
                        materialization with DELETE-then-INSERT-all
   frontmatter.rs       Line-oriented YAML frontmatter editor (preserves comments)
+  body.rs              Line-oriented `## Section` primitives (ensure_section,
+                       append_line_to_section). Sibling to frontmatter.rs.
+                       Pure functions over &str.
   cli/
     mod.rs             Clap CLI definition
-    log_cmd.rs         `daylog log` — write to today's note
+    bp_cmd.rs          `daylog bp` — slot dispatch + YAML scalars + Vitals line
     completions.rs     Shell completion generation
+    food_cmd.rs        `daylog food` — nutrition-db lookup, scaling, custom flags
+    log_cmd.rs         `daylog log` — write to today's note
+    note_cmd.rs        `daylog note` — alias resolution + body append
   modules/
     mod.rs             Module trait + registry + InsertOp + YamlPath + parse_color
     dashboard.rs       Today's vitals (sleep, weight, mood, energy)
