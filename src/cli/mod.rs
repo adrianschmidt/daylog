@@ -112,8 +112,10 @@ pub enum Commands {
     },
     /// Log a free-text note to the day's `## Notes` section
     Note {
+        /// Override target date (YYYY-MM-DD). Default: effective_today.
         #[arg(long)]
         date: Option<String>,
+        /// Override entry time (HH:MM 24h or H:MMam/pm 12h). Default: now.
         #[arg(long)]
         time: Option<String>,
         /// Note text or [notes.aliases] key (joined; no shell quoting needed)
@@ -122,15 +124,22 @@ pub enum Commands {
     },
     /// Log a blood pressure reading (YAML + `## Vitals` line)
     Bp {
+        /// Systolic pressure (mmHg)
         sys: i32,
+        /// Diastolic pressure (mmHg)
         dia: i32,
+        /// Pulse (bpm)
         pulse: i32,
+        /// Force the morning slot (otherwise auto-pick by time vs. the 14:00 cutoff)
         #[arg(long, conflicts_with = "evening")]
         morning: bool,
+        /// Force the evening slot
         #[arg(long)]
         evening: bool,
+        /// Override target date (YYYY-MM-DD). Default: effective_today.
         #[arg(long)]
         date: Option<String>,
+        /// Override entry time (HH:MM 24h or H:MMam/pm 12h). Default: now.
         #[arg(long)]
         time: Option<String>,
     },
