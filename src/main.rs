@@ -22,6 +22,10 @@ fn main() -> Result<()> {
             daylog::cli::completions::generate(shell);
             Ok(())
         }
+        Some(Commands::Readme) => {
+            daylog::cli::readme_cmd::execute();
+            Ok(())
+        }
         Some(Commands::SleepStart { time }) => cmd_sleep_start(time.as_deref()),
         Some(Commands::SleepEnd { time }) => cmd_sleep_end(time.as_deref()),
         Some(Commands::Food {

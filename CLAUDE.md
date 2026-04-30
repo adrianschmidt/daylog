@@ -57,6 +57,7 @@ src/
     food_cmd.rs        `daylog food` — nutrition-db lookup, scaling, custom flags
     log_cmd.rs         `daylog log` — write to today's note
     note_cmd.rs        `daylog note` — alias resolution + body append
+    readme_cmd.rs      `daylog readme` — print embedded README.md to stdout
   modules/
     mod.rs             Module trait + registry + InsertOp + YamlPath + parse_color
     dashboard.rs       Today's vitals (sleep, weight, mood, energy)
