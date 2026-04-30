@@ -1,6 +1,6 @@
 //! `daylog food` — append a food entry to the day's `## Food` section.
-//! Implementation is split across tasks: amount parsing here; nutrition
-//! scaling, output formatting, and DB lookup in subsequent tasks.
+//! Implementation is split across tasks: amount parsing, nutrient scaling,
+//! and output formatting here; DB lookup and CLI wiring in Task 10.
 
 use color_eyre::eyre::{bail, Result};
 use color_eyre::Help;
@@ -142,6 +142,12 @@ fn render_total_only(food: &FoodLookup) -> Result<RenderedEntry> {
     })
 }
 
+#[derive(Debug, Clone, Copy, PartialEq)]
+enum PanelKind {
+    Per100g,
+    Per100ml,
+}
+
 fn render_with_amount(food: &FoodLookup, amount: Amount) -> Result<RenderedEntry> {
     if food.per_100g.is_none() && food.per_100ml.is_none() && food.total.is_some() {
         eprintln!(
@@ -153,14 +159,15 @@ fn render_with_amount(food: &FoodLookup, amount: Amount) -> Result<RenderedEntry
         return render_total_only(food);
     }
 
-    // Resolve which panel to scale and what the scaling factor is.
-    let (panel, factor) = match amount.unit {
+    // Resolve which panel to scale, what the scaling factor is, and which
+    // panel kind was chosen (needed for correct GL lookup below).
+    let (panel, factor, panel_kind) = match amount.unit {
         AmountUnit::Gram => match (&food.per_100g, &food.per_100ml, food.density_g_per_ml) {
-            (Some(p), _, _) => (p, amount.value / 100.0),
+            (Some(p), _, _) => (p, amount.value / 100.0, PanelKind::Per100g),
             (None, Some(p), Some(d)) if d > 0.0 => {
                 // Solid input on liquid-only food via density: g → ml.
                 let ml = amount.value / d;
-                (p, ml / 100.0)
+                (p, ml / 100.0, PanelKind::Per100ml)
             }
             (None, Some(_), _) => {
                 bail!(
@@ -177,11 +184,11 @@ fn render_with_amount(food: &FoodLookup, amount: Amount) -> Result<RenderedEntry
             ),
         },
         AmountUnit::Milliliter => match (&food.per_100ml, &food.per_100g, food.density_g_per_ml) {
-            (Some(p), _, _) => (p, amount.value / 100.0),
+            (Some(p), _, _) => (p, amount.value / 100.0, PanelKind::Per100ml),
             (None, Some(p), Some(d)) if d > 0.0 => {
                 // Liquid input on solid-only food via density: ml → g.
                 let g = amount.value * d;
-                (p, g / 100.0)
+                (p, g / 100.0, PanelKind::Per100g)
             }
             (None, Some(_), _) => {
                 bail!(
@@ -205,9 +212,12 @@ fn render_with_amount(food: &FoodLookup, amount: Amount) -> Result<RenderedEntry
     let fat = panel.fat.map(|v| v * factor);
 
     let gi = food.gi;
-    let gl_from_panel = match amount.unit {
-        AmountUnit::Gram => food.gl_per_100g.map(|v| v * factor),
-        AmountUnit::Milliliter => food.gl_per_100ml.map(|v| v * factor),
+    // Key GL lookup on the panel actually chosen, not the input unit.
+    // When density bridges the units (e.g., ml input → per_100g panel),
+    // using the input unit would look up the wrong GL column.
+    let gl_from_panel = match panel_kind {
+        PanelKind::Per100g => food.gl_per_100g.map(|v| v * factor),
+        PanelKind::Per100ml => food.gl_per_100ml.map(|v| v * factor),
     };
     let gl = gl_from_panel.or_else(|| auto_gl(gi, carbs));
 
@@ -616,5 +626,25 @@ mod tests {
     fn parse_negative_or_zero_errors() {
         assert!(parse_amount("-5g").is_err());
         assert!(parse_amount("0g").is_err());
+    }
+
+    #[test]
+    fn lookup_density_bridge_uses_correct_gl_panel() {
+        // per_100g-only food with gl_per_100g set, queried with ml input.
+        // Without the fix, GL would be looked up on gl_per_100ml (None),
+        // dropped, and auto-compute would only rescue if gi is set.
+        // Strip gi to ensure auto-compute can't mask the bug.
+        let mut f = lookup_per_100g();
+        f.density_g_per_ml = Some(1.0);
+        f.gi = None;
+        let amt = parse_amount("200ml").unwrap();
+        let r = render_lookup(&f, Some(amt)).unwrap();
+        // gl_per_100g = 2.0; 200ml * 1.0 g/ml = 200g; factor = 200/100 = 2.
+        // Expected GL = 2.0 * 2.0 = 4.0.
+        assert_eq!(
+            r.gl,
+            Some(4.0),
+            "expected per_100g GL to be used in density-bridge"
+        );
     }
 }
