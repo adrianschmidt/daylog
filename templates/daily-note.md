@@ -33,5 +33,9 @@ lifts:
 #     - V7
 ---
 
+## Food
+
+## Vitals
+
 ## Notes
 
