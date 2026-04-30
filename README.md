@@ -104,6 +104,54 @@ database (in `notes_dir`). If you sync `notes_dir` across machines via
 git/Dropbox/iCloud, add `.daylog-state.toml` to your ignore list — the
 sidecar is per-machine state and is not designed for cross-device sync.
 
+### Logging food, notes, and BP from the CLI
+
+Three top-level subcommands append timestamped entries to the
+`## Food`, `## Notes`, and `## Vitals` sections of the day's note,
+auto-inserting the section if it's missing.
+
+```bash
+# Food — nutrition-db lookup with gram or ml amount
+daylog food "kelda skogssvampsoppa" 500g
+daylog food "helmjölk" 250ml
+
+# Food — total-panel foods need no amount
+daylog food te
+daylog food proteinshake
+
+# Food — one-off custom item, all four macros required together;
+# --gi / --gl / --ii independently optional. GL auto-computes when
+# GI and carbs are both known.
+daylog food --kcal 350 --protein 7 --carbs 24 --fat 25 \
+            --gi 50 "Random pasta dish" 500g
+
+# Note — literal text or a [notes.aliases] key
+daylog note "Attentin 10mg"
+daylog note med-morning
+
+# BP — sys dia pulse; auto-picks bp_morning_* or bp_evening_*
+# based on the measurement time vs. the 14:00 cutoff. --morning /
+# --evening override.
+daylog bp 141 96 70
+daylog bp --evening 133 73 62
+
+# Shared flags: --date YYYY-MM-DD and --time HH:MM (or H:MMam/pm)
+# for retroactive entries.
+daylog note --date 2026-04-29 --time 23:30 "Aritonin"
+daylog bp --time 08:00 141 96 70   # logged at 14:30 — still morning
+```
+
+`[notes.aliases]` in `config.toml` lets you map short keys to
+longer note text:
+
+```toml
+[notes.aliases]
+med-morning = "Morgonmedicin (Elvanse 70mg, Escitalopram 20mg, Losartan/Hydro 100/12.5mg, Vialerg 10mg)"
+```
+
+These commands write the markdown only; the watcher re-materializes
+the database within ~500 ms.
+
 ## Tabs
 
 - **Dashboard**: Today's vitals — sleep, weight, mood, energy, session context

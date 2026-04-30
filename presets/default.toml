@@ -32,6 +32,11 @@ rdl = { display = "RDL", color = "red" }
 # resting_hr = { display = "Resting HR", color = "red", unit = "bpm" }
 # meditation_min = { display = "Meditation", color = "magenta", unit = "min" }
 
+# [notes.aliases]
+# Short keys that `daylog note <key>` expands to fixed text.
+# med-morning = "Morgonmedicin (Elvanse 70mg, Escitalopram 20mg, ...)"
+# med-evening = "Kvällsmedicin (Escitalopram 10mg, ...)"
+
 # [climbing]
 # target_hang_weight = 0.0
 # [climbing.board_adjustments]
