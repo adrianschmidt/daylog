@@ -43,7 +43,6 @@ pub struct DaySummary {
     pub weight_delta: Option<(f64, NaiveDate)>,
     pub bp_morning: Option<BpReading>,
     pub custom_metrics: Vec<CustomMetric>,
-    pub food_skipped: usize,
     pub goals_warnings: Vec<String>,
     pub weight_unit: WeightUnit,
 }
@@ -123,11 +122,15 @@ pub fn render_text(summary: &DaySummary, goals: &Goals, color: bool) -> String {
             goals.source_path.display()
         ));
     }
-    if summary.food_skipped > 0 {
-        let plural = if summary.food_skipped == 1 { "" } else { "s" };
+    if summary.food.skipped_lines > 0 {
+        let plural = if summary.food.skipped_lines == 1 {
+            ""
+        } else {
+            "s"
+        };
         hints.push(format!(
             "({} food line{plural} couldn't be parsed)",
-            summary.food_skipped
+            summary.food.skipped_lines
         ));
     }
     for w in &summary.goals_warnings {
@@ -330,7 +333,6 @@ mod tests {
             weight_delta: Some((1.3, NaiveDate::from_ymd_opt(2026, 4, 29).unwrap())),
             bp_morning: None,
             custom_metrics: vec![],
-            food_skipped: 0,
             goals_warnings: vec![],
             weight_unit: WeightUnit::Kg,
         }
@@ -421,7 +423,7 @@ mod tests {
     #[test]
     fn render_text_skipped_food_lines_emits_hint() {
         let mut s = fixture_summary();
-        s.food_skipped = 2;
+        s.food.skipped_lines = 2;
         let g = fixture_goals();
         let out = render_text(&s, &g, false);
         assert!(
@@ -489,5 +491,36 @@ mod tests {
         let out = render_text(&s, &g, false);
         assert!(out.contains("Resting HR: 72 / ≤65 bpm"), "got:\n{out}");
         assert!(out.contains("7 above max"), "got:\n{out}");
+    }
+
+    #[test]
+    fn render_text_target_only_threshold_has_no_annotation() {
+        let mut s = fixture_summary();
+        s.custom_metrics.push(CustomMetric {
+            id: "rhr".into(),
+            display: "RHR".into(),
+            value: Some(60.0),
+            unit: Some("bpm".into()),
+        });
+        let mut g = fixture_goals();
+        g.thresholds.insert(
+            "rhr".into(),
+            Threshold {
+                target: Some(58.0),
+                min: None,
+                max: None,
+            },
+        );
+        let out = render_text(&s, &g, false);
+        assert!(out.contains("RHR: 60 / → 58 bpm"), "got:\n{out}");
+        // No annotation suffix for target-only thresholds: isolate the RHR
+        // row and confirm it has no ✓ / below min / above max marker.
+        let rhr_line = out
+            .lines()
+            .find(|l| l.starts_with("RHR:"))
+            .expect("RHR row missing");
+        assert!(!rhr_line.contains("✓"), "got:\n{rhr_line}");
+        assert!(!rhr_line.contains("below min"), "got:\n{rhr_line}");
+        assert!(!rhr_line.contains("above max"), "got:\n{rhr_line}");
     }
 }
