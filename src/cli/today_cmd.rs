@@ -306,6 +306,146 @@ fn render_custom_row(metric: &CustomMetric, threshold: Option<&Threshold>, color
     }
 }
 
+pub fn render_json(summary: &DaySummary, goals: &Goals) -> serde_json::Value {
+    let mut metrics = serde_json::Map::new();
+
+    // Food macros — always present (zeros if no entries).
+    metrics.insert(
+        "kcal".into(),
+        metric_obj(summary.food.kcal, goals.thresholds.get("kcal"), None),
+    );
+    metrics.insert(
+        "protein".into(),
+        metric_obj(summary.food.protein, goals.thresholds.get("protein"), None),
+    );
+    metrics.insert(
+        "carbs".into(),
+        metric_obj(summary.food.carbs, goals.thresholds.get("carbs"), None),
+    );
+    metrics.insert(
+        "fat".into(),
+        metric_obj(summary.food.fat, goals.thresholds.get("fat"), None),
+    );
+
+    // Optional days-table metrics.
+    if let Some(w) = summary.day.weight {
+        let mut o = metric_obj(w, goals.thresholds.get("weight"), None);
+        if let Some((delta, prev)) = summary.weight_delta {
+            o["delta"] = delta.into();
+            o["delta_vs_date"] = prev.format("%Y-%m-%d").to_string().into();
+        }
+        metrics.insert("weight".into(), o);
+    }
+    if let Some(h) = summary.day.sleep_hours {
+        metrics.insert(
+            "sleep_hours".into(),
+            metric_obj(h, goals.thresholds.get("sleep_hours"), None),
+        );
+    }
+    if let Some(m) = summary.day.mood {
+        metrics.insert(
+            "mood".into(),
+            metric_obj(m as f64, goals.thresholds.get("mood"), None),
+        );
+    }
+    if let Some(e) = summary.day.energy {
+        metrics.insert(
+            "energy".into(),
+            metric_obj(e as f64, goals.thresholds.get("energy"), None),
+        );
+    }
+
+    // Custom metrics (only those with logged values).
+    for m in &summary.custom_metrics {
+        if let Some(v) = m.value {
+            metrics.insert(
+                m.id.clone(),
+                metric_obj(v, goals.thresholds.get(&m.id), m.unit.clone()),
+            );
+        }
+    }
+
+    // Sleep object (richer view) — separate from `metrics.sleep_hours`.
+    let sleep = match (
+        summary.day.sleep_hours,
+        &summary.day.sleep_start,
+        &summary.day.sleep_end,
+    ) {
+        (Some(h), Some(s), Some(e)) => serde_json::json!({
+            "hours": h,
+            "start": s,
+            "end": e,
+        }),
+        (Some(h), _, _) => serde_json::json!({ "hours": h }),
+        _ => serde_json::Value::Null,
+    };
+
+    let bp = match &summary.bp_morning {
+        Some(b) => serde_json::json!({ "sys": b.sys, "dia": b.dia, "pulse": b.pulse }),
+        None => serde_json::Value::Null,
+    };
+
+    // Warnings: collected from food.skipped_lines + goals_warnings.
+    let mut warnings: Vec<serde_json::Value> = summary
+        .goals_warnings
+        .iter()
+        .map(|s| serde_json::Value::String(s.clone()))
+        .collect();
+    if summary.food.skipped_lines > 0 {
+        let plural = if summary.food.skipped_lines == 1 {
+            ""
+        } else {
+            "s"
+        };
+        warnings.push(serde_json::Value::String(format!(
+            "{} food line{plural} couldn't be parsed",
+            summary.food.skipped_lines
+        )));
+    }
+
+    serde_json::json!({
+        "date": summary.date.format("%Y-%m-%d").to_string(),
+        "metrics": serde_json::Value::Object(metrics),
+        "sleep": sleep,
+        "bp_morning": bp,
+        "goals_present": goals.present,
+        "warnings": warnings,
+    })
+}
+
+fn metric_obj(
+    value: f64,
+    threshold: Option<&Threshold>,
+    unit: Option<String>,
+) -> serde_json::Value {
+    let mut o = serde_json::Map::new();
+    o.insert("value".into(), value.into());
+    let (min, max, target) = match threshold {
+        Some(t) => (t.min, t.max, t.target),
+        None => (None, None, None),
+    };
+    o.insert(
+        "min".into(),
+        min.map(serde_json::Value::from)
+            .unwrap_or(serde_json::Value::Null),
+    );
+    o.insert(
+        "max".into(),
+        max.map(serde_json::Value::from)
+            .unwrap_or(serde_json::Value::Null),
+    );
+    o.insert(
+        "target".into(),
+        target
+            .map(serde_json::Value::from)
+            .unwrap_or(serde_json::Value::Null),
+    );
+    if let Some(u) = unit {
+        o.insert("unit".into(), serde_json::Value::String(u));
+    }
+    serde_json::Value::Object(o)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -491,6 +631,46 @@ mod tests {
         let out = render_text(&s, &g, false);
         assert!(out.contains("Resting HR: 72 / ≤65 bpm"), "got:\n{out}");
         assert!(out.contains("7 above max"), "got:\n{out}");
+    }
+
+    #[test]
+    fn render_json_shape() {
+        let s = fixture_summary();
+        let g = fixture_goals();
+        let v = render_json(&s, &g);
+        assert_eq!(v["date"], "2026-04-30");
+        let kcal = &v["metrics"]["kcal"];
+        assert_eq!(kcal["value"], 1513.0);
+        assert_eq!(kcal["min"], 1900.0);
+        assert_eq!(kcal["max"], 2200.0);
+        assert!(kcal["target"].is_null());
+        assert_eq!(v["metrics"]["weight"]["value"], 121.5);
+        assert_eq!(v["metrics"]["weight"]["target"], 110.0);
+        assert_eq!(v["metrics"]["weight"]["delta"], 1.3);
+        assert_eq!(v["metrics"]["weight"]["delta_vs_date"], "2026-04-29");
+        assert!(v["bp_morning"].is_null());
+        assert_eq!(v["sleep"]["hours"], 6.4);
+        assert_eq!(v["sleep"]["start"], "23:00");
+        assert_eq!(v["sleep"]["end"], "05:24");
+        assert_eq!(v["goals_present"], true);
+        assert!(v["warnings"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn render_json_includes_warnings_and_skipped() {
+        let mut s = fixture_summary();
+        s.food.skipped_lines = 1;
+        s.goals_warnings
+            .push("unknown metric `mystery` in goals.md".into());
+        let g = fixture_goals();
+        let v = render_json(&s, &g);
+        let warnings = v["warnings"].as_array().unwrap();
+        assert!(warnings
+            .iter()
+            .any(|w| w.as_str().unwrap().contains("mystery")));
+        assert!(warnings
+            .iter()
+            .any(|w| w.as_str().unwrap().contains("food line")));
     }
 
     #[test]
