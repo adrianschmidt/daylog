@@ -369,7 +369,7 @@ fn trim_num(v: f64) -> String {
     if (v - v.round()).abs() < 1e-9 {
         format!("{}", v.round() as i64)
     } else {
-        format!("{v}")
+        format!("{v:.1}")
     }
 }
 
@@ -972,5 +972,27 @@ mod tests {
         assert_eq!(summary.food, FoodTotals::default());
         assert!(summary.day.weight.is_none());
         assert!(summary.bp_morning.is_none());
+    }
+
+    #[test]
+    fn trim_num_subtracted_decimals_round_to_one_dp() {
+        // Reproduce the IEEE-754 artifact: 121.5 - 121.3 = 0.20000000000000284.
+        let delta = 121.5_f64 - 121.3_f64;
+        assert!(delta != 0.2, "test premise broken: got {delta}");
+        assert_eq!(trim_num(delta), "0.2");
+    }
+
+    #[test]
+    fn trim_num_integer_values_have_no_decimal() {
+        assert_eq!(trim_num(1900.0), "1900");
+        assert_eq!(trim_num(0.0), "0");
+        assert_eq!(trim_num(-7.0), "-7");
+    }
+
+    #[test]
+    fn trim_num_clean_decimal_renders_one_dp() {
+        assert_eq!(trim_num(121.5), "121.5");
+        assert_eq!(trim_num(0.5), "0.5");
+        assert_eq!(trim_num(-1.3), "-1.3");
     }
 }
