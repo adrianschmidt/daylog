@@ -3,7 +3,8 @@
 use std::io::IsTerminal;
 
 use chrono::NaiveDate;
-use color_eyre::eyre::Result;
+use color_eyre::eyre::{Result, WrapErr};
+use color_eyre::Help;
 use rusqlite::Connection;
 use yaml_rust2::{Yaml, YamlLoader};
 
@@ -51,10 +52,11 @@ pub struct DaySummary {
     pub weight_unit: WeightUnit,
 }
 
-pub fn execute(date_flag: Option<&str>, json: bool, config: &Config) -> Result<()> {
-    let date = match date_flag {
+pub fn execute(date: Option<&str>, json: bool, config: &Config) -> Result<()> {
+    let date = match date {
         Some(s) => NaiveDate::parse_from_str(s.trim(), "%Y-%m-%d")
-            .map_err(|_| color_eyre::eyre::eyre!("Invalid date: '{s}'. Expected YYYY-MM-DD."))?,
+            .map_err(|_| color_eyre::eyre::eyre!("Invalid date: '{s}'. Expected YYYY-MM-DD."))
+            .suggestion("Use a date in YYYY-MM-DD form, e.g., 2026-04-30.")?,
         None => config.effective_today_date(),
     };
 
@@ -107,7 +109,14 @@ pub fn assemble(date: NaiveDate, config: &Config, conn: &Connection) -> Result<D
 
     // 1. Parse food from {date}.md (if it exists). Normalize CRLF for parsers.
     let note_path = config.notes_dir_path().join(format!("{date_str}.md"));
-    let raw_content = std::fs::read_to_string(&note_path).unwrap_or_default();
+    let raw_content = match std::fs::read_to_string(&note_path) {
+        Ok(s) => s,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
+        Err(e) => {
+            return Err(color_eyre::eyre::eyre!(e))
+                .wrap_err_with(|| format!("Failed to read {}", note_path.display()));
+        }
+    };
     let note_content = raw_content.replace("\r\n", "\n");
     let food = crate::food_sum::sum_food_section(&note_content);
 
@@ -163,7 +172,10 @@ fn compute_weight_delta(
     let today_weight = day.weight?;
     let trend = crate::db::load_weight_trend(conn, 60).ok()?;
     for (d_str, w) in trend {
-        let d = NaiveDate::parse_from_str(&d_str, "%Y-%m-%d").ok()?;
+        let d = match NaiveDate::parse_from_str(&d_str, "%Y-%m-%d") {
+            Ok(d) => d,
+            Err(_) => continue, // unreachable in practice; defensive against malformed dates
+        };
         if d < date {
             return Some((today_weight - w, d));
         }
