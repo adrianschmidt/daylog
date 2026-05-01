@@ -1,7 +1,11 @@
 //! `daylog today [date]` — print a compact daily summary.
 
+use std::io::IsTerminal;
+
 use chrono::NaiveDate;
 use color_eyre::eyre::Result;
+use rusqlite::Connection;
+use yaml_rust2::{Yaml, YamlLoader};
 
 use crate::config::{Config, WeightUnit};
 use crate::food_sum::FoodTotals;
@@ -47,8 +51,182 @@ pub struct DaySummary {
     pub weight_unit: WeightUnit,
 }
 
-pub fn execute(_date_flag: Option<&str>, _json: bool, _config: &Config) -> Result<()> {
-    color_eyre::eyre::bail!("daylog today: not yet implemented")
+pub fn execute(date_flag: Option<&str>, json: bool, config: &Config) -> Result<()> {
+    let date = match date_flag {
+        Some(s) => NaiveDate::parse_from_str(s.trim(), "%Y-%m-%d")
+            .map_err(|_| color_eyre::eyre::eyre!("Invalid date: '{s}'. Expected YYYY-MM-DD."))?,
+        None => config.effective_today_date(),
+    };
+
+    let db_path = config.db_path();
+    if !db_path.exists() {
+        color_eyre::eyre::bail!(
+            "Database not found at {}. Run `daylog init` or `daylog sync` first.",
+            db_path.display()
+        );
+    }
+    let conn = crate::db::open_ro(&db_path)?;
+    let mut summary = assemble(date, config, &conn)?;
+
+    let goals = crate::goals::load_goals(&config.notes_dir_path())?;
+
+    // Detect goal keys with no known data source → warnings.
+    let known: std::collections::HashSet<&str> = [
+        "kcal",
+        "protein",
+        "carbs",
+        "fat",
+        "weight",
+        "sleep_hours",
+        "mood",
+        "energy",
+    ]
+    .into_iter()
+    .collect();
+    let custom_ids: std::collections::HashSet<String> = config.metrics.keys().cloned().collect();
+    for name in goals.thresholds.keys() {
+        if !known.contains(name.as_str()) && !custom_ids.contains(name) {
+            summary
+                .goals_warnings
+                .push(format!("unknown metric `{name}` in goals.md"));
+        }
+    }
+
+    if json {
+        let v = render_json(&summary, &goals);
+        println!("{}", serde_json::to_string_pretty(&v)?);
+    } else {
+        let color = std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none();
+        print!("{}", render_text(&summary, &goals, color));
+    }
+    Ok(())
+}
+
+pub fn assemble(date: NaiveDate, config: &Config, conn: &Connection) -> Result<DaySummary> {
+    let date_str = date.format("%Y-%m-%d").to_string();
+
+    // 1. Parse food from {date}.md (if it exists). Normalize CRLF for parsers.
+    let note_path = config.notes_dir_path().join(format!("{date_str}.md"));
+    let raw_content = std::fs::read_to_string(&note_path).unwrap_or_default();
+    let note_content = raw_content.replace("\r\n", "\n");
+    let food = crate::food_sum::sum_food_section(&note_content);
+
+    // 2. days-table fields.
+    let day = load_day_fields(conn, &date_str)?;
+
+    // 3. Weight delta vs previous logged day (look back 60 days).
+    let weight_delta = compute_weight_delta(conn, date, &day);
+
+    // 4. BP morning — extract from YAML frontmatter (not in DB).
+    let bp_morning = parse_bp_morning(&note_content);
+
+    // 5. Custom metrics from [metrics] config.
+    let custom_metrics = load_custom_metrics(conn, &date_str, config)?;
+
+    Ok(DaySummary {
+        date,
+        food,
+        day,
+        weight_delta,
+        bp_morning,
+        custom_metrics,
+        goals_warnings: vec![], // populated by execute() after loading goals
+        weight_unit: config.weight_unit,
+    })
+}
+
+fn load_day_fields(conn: &Connection, date_str: &str) -> Result<DayFields> {
+    let mut stmt = conn.prepare(
+        "SELECT sleep_start, sleep_end, sleep_hours, mood, energy, weight
+         FROM days WHERE date = ?1",
+    )?;
+    let row = stmt
+        .query_row([date_str], |r| {
+            Ok(DayFields {
+                sleep_start: r.get(0)?,
+                sleep_end: r.get(1)?,
+                sleep_hours: r.get(2)?,
+                mood: r.get(3)?,
+                energy: r.get(4)?,
+                weight: r.get(5)?,
+            })
+        })
+        .ok();
+    Ok(row.unwrap_or_default())
+}
+
+fn compute_weight_delta(
+    conn: &Connection,
+    date: NaiveDate,
+    day: &DayFields,
+) -> Option<(f64, NaiveDate)> {
+    let today_weight = day.weight?;
+    let trend = crate::db::load_weight_trend(conn, 60).ok()?;
+    for (d_str, w) in trend {
+        let d = NaiveDate::parse_from_str(&d_str, "%Y-%m-%d").ok()?;
+        if d < date {
+            return Some((today_weight - w, d));
+        }
+    }
+    None
+}
+
+fn parse_bp_morning(content: &str) -> Option<BpReading> {
+    let yaml_str = extract_frontmatter_str(content)?;
+    let docs = YamlLoader::load_from_str(yaml_str).ok()?;
+    let doc = docs.into_iter().next()?;
+    let map = match doc {
+        Yaml::Hash(h) => h,
+        _ => return None,
+    };
+    let get_int = |key: &str| -> Option<i32> {
+        map.iter()
+            .find(|(k, _)| k.as_str() == Some(key))
+            .and_then(|(_, v)| v.as_i64())
+            .map(|i| i as i32)
+    };
+    Some(BpReading {
+        sys: get_int("bp_morning_sys")?,
+        dia: get_int("bp_morning_dia")?,
+        pulse: get_int("bp_morning_pulse")?,
+    })
+}
+
+fn extract_frontmatter_str(content: &str) -> Option<&str> {
+    let body = content.strip_prefix("---\n")?;
+    let close = body.find("\n---\n").or_else(|| {
+        if body.ends_with("\n---") {
+            Some(body.len() - 4)
+        } else {
+            None
+        }
+    })?;
+    Some(&body[..close])
+}
+
+fn load_custom_metrics(
+    conn: &Connection,
+    date_str: &str,
+    config: &Config,
+) -> Result<Vec<CustomMetric>> {
+    if config.metrics.is_empty() {
+        return Ok(vec![]);
+    }
+    let logged: std::collections::HashMap<String, f64> = crate::db::load_metrics(conn, date_str)?
+        .into_iter()
+        .collect();
+    let mut out: Vec<CustomMetric> = config
+        .metrics
+        .iter()
+        .map(|(id, cfg)| CustomMetric {
+            id: id.clone(),
+            display: cfg.display.clone(),
+            unit: cfg.unit.clone(),
+            value: logged.get(id).copied(),
+        })
+        .collect();
+    out.sort_by(|a, b| a.id.cmp(&b.id));
+    Ok(out)
 }
 
 const RED: &str = "\x1b[31m";
@@ -702,5 +880,97 @@ mod tests {
         assert!(!rhr_line.contains("✓"), "got:\n{rhr_line}");
         assert!(!rhr_line.contains("below min"), "got:\n{rhr_line}");
         assert!(!rhr_line.contains("above max"), "got:\n{rhr_line}");
+    }
+
+    use crate::db;
+
+    fn config_in(notes_dir: &std::path::Path) -> Config {
+        let toml_str = format!(
+            "notes_dir = '{}'\ntime_format = '24h'\nweight_unit = 'kg'\n",
+            notes_dir.display().to_string().replace('\\', "/")
+        );
+        toml::from_str(&toml_str).unwrap()
+    }
+
+    #[test]
+    fn assemble_reads_food_weight_sleep_bp() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let config = config_in(dir.path());
+
+        // Write a daily note with food + BP morning frontmatter.
+        let date = "2026-04-30";
+        let note = format!(
+            "---\n\
+             date: {date}\n\
+             weight: 121.5\n\
+             sleep: \"23:00-05:24\"\n\
+             bp_morning_sys: 138\n\
+             bp_morning_dia: 88\n\
+             bp_morning_pulse: 70\n\
+             ---\n\n\
+             ## Food\n\
+             - **08:00** Eggs (200 kcal, 12.0g protein, 1.0g carbs, 15.0g fat)\n\
+             - **12:00** Pasta (500 kcal, 18.0g protein, 80.0g carbs, 10.0g fat)\n"
+        );
+        std::fs::write(dir.path().join(format!("{date}.md")), note).unwrap();
+
+        // Set up DB and sync the note (so days table gets weight/sleep).
+        let registry = crate::modules::build_registry(&config);
+        let conn = db::open_rw(&config.db_path()).unwrap();
+        db::init_db(&conn, &registry).unwrap();
+        crate::modules::validate_module_tables(&registry).unwrap();
+        crate::materializer::sync_all(&conn, &config.notes_dir_path(), &config, &registry).unwrap();
+
+        let target = NaiveDate::from_ymd_opt(2026, 4, 30).unwrap();
+        let summary = assemble(target, &config, &conn).unwrap();
+
+        assert_eq!(summary.food.kcal, 700.0);
+        assert_eq!(summary.food.entry_count, 2);
+        assert_eq!(summary.day.weight, Some(121.5));
+        assert!((summary.day.sleep_hours.unwrap() - 6.4).abs() < 0.05);
+        let bp = summary.bp_morning.unwrap();
+        assert_eq!(bp.sys, 138);
+        assert_eq!(bp.dia, 88);
+        assert_eq!(bp.pulse, 70);
+    }
+
+    #[test]
+    fn assemble_weight_delta_uses_previous_logged_day() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let config = config_in(dir.path());
+
+        for (d, w) in [("2026-04-25", 120.0), ("2026-04-30", 121.3)] {
+            let note = format!("---\ndate: {d}\nweight: {w}\n---\n\n## Food\n");
+            std::fs::write(dir.path().join(format!("{d}.md")), note).unwrap();
+        }
+
+        let registry = crate::modules::build_registry(&config);
+        let conn = db::open_rw(&config.db_path()).unwrap();
+        db::init_db(&conn, &registry).unwrap();
+        crate::modules::validate_module_tables(&registry).unwrap();
+        crate::materializer::sync_all(&conn, &config.notes_dir_path(), &config, &registry).unwrap();
+
+        let target = NaiveDate::from_ymd_opt(2026, 4, 30).unwrap();
+        let summary = assemble(target, &config, &conn).unwrap();
+        let (delta, prev) = summary.weight_delta.unwrap();
+        assert!((delta - 1.3).abs() < 1e-6);
+        assert_eq!(prev, NaiveDate::from_ymd_opt(2026, 4, 25).unwrap());
+    }
+
+    #[test]
+    fn assemble_missing_note_yields_zero_food() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let config = config_in(dir.path());
+
+        let registry = crate::modules::build_registry(&config);
+        let conn = db::open_rw(&config.db_path()).unwrap();
+        db::init_db(&conn, &registry).unwrap();
+        crate::modules::validate_module_tables(&registry).unwrap();
+
+        let target = NaiveDate::from_ymd_opt(2026, 4, 30).unwrap();
+        let summary = assemble(target, &config, &conn).unwrap();
+        assert_eq!(summary.food, FoodTotals::default());
+        assert!(summary.day.weight.is_none());
+        assert!(summary.bp_morning.is_none());
     }
 }
