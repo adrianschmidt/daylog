@@ -83,6 +83,8 @@ daylog log metric resting_hr 52 # Log a custom metric
 daylog sleep-start              # Record bedtime (uses now, or pass a time)
 daylog sleep-end                # Finalize sleep entry on today's note
 daylog status --json            # Today's data as JSON
+daylog today                    # Compact daily summary (food, weight, sleep, BP, metrics)
+daylog today 2026-04-29 --json  # Summary for a past date as JSON
 daylog edit                     # Open today's note in $EDITOR
 daylog sync                     # Sync DB without launching TUI
 daylog rebuild                  # Rebuild DB from all notes
@@ -151,6 +153,41 @@ med-morning = "Morning meds (Vyvanse 70mg, Lexapro 20mg, Losartan/HCTZ 100/12.5m
 
 These commands write the markdown only; the watcher re-materializes
 the database within ~500 ms.
+
+### Daily summary
+
+`daylog today [date]` prints a compact summary for the day — food
+totals (kcal/protein/carbs/fat from the `## Food` section), morning
+weight, sleep, morning BP, and any custom metrics — with optional
+goal comparison from `goals.md`. Add `--json` for machine-readable
+output suitable for AI agents and scripts.
+
+```bash
+daylog today                    # today's summary
+daylog today 2026-04-29         # any past date
+daylog today --json             # JSON for tooling
+```
+
+## Goals
+
+Goals live in `goals.md` in your notes directory. The body is
+free-form (notes, derivations, history); the YAML frontmatter at the
+top defines the numeric thresholds that `daylog today` compares
+against:
+
+```yaml
+---
+kcal_min: 1900
+kcal_max: 2200
+protein_min: 140
+weight_target: 110
+---
+```
+
+Suffixes recognized: `_min`, `_max`, `_target`. Any frontmatter key
+matching `<metric>_<suffix>` is grouped by `<metric>`. Non-matching
+keys are silently ignored, so the file can also hold commentary keys
+(e.g., `last_review: 2026-04-30`). Suffix matching is case-sensitive.
 
 ## Tabs
 
