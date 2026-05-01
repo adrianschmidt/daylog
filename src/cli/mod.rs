@@ -5,6 +5,7 @@ pub mod log_cmd;
 pub mod note_cmd;
 pub mod readme_cmd;
 pub mod sleep_cmd;
+pub mod today_cmd;
 
 use clap::{Parser, Subcommand};
 use clap_complete::Shell;
@@ -145,6 +146,15 @@ pub enum Commands {
         /// Override entry time (HH:MM 24h or H:MMam/pm 12h). Default: now.
         #[arg(long)]
         time: Option<String>,
+    },
+    /// Print a compact daily summary (food totals, weight, sleep, BP morning,
+    /// custom metrics) with optional goal comparison from goals.md.
+    Today {
+        /// Date in YYYY-MM-DD format (defaults to effective today)
+        date: Option<String>,
+        /// Print JSON instead of formatted text
+        #[arg(long)]
+        json: bool,
     },
 }
 

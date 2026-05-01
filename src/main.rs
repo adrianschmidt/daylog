@@ -53,6 +53,7 @@ fn main() -> Result<()> {
             date,
             time,
         }) => cmd_bp(sys, dia, pulse, morning, evening, date, time),
+        Some(Commands::Today { date, json }) => cmd_today(date, json),
         None => cmd_run(),
     }
 }
@@ -357,4 +358,9 @@ fn cmd_bp(
         time.as_deref(),
         &config,
     )
+}
+
+fn cmd_today(date: Option<String>, json: bool) -> Result<()> {
+    let config = Config::load()?;
+    daylog::cli::today_cmd::execute(date.as_deref(), json, &config)
 }
