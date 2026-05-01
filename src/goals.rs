@@ -23,6 +23,10 @@ pub struct Goals {
     pub present: bool,
 }
 
+/// Load goals from `{notes_dir}/goals.md`.
+///
+/// Suffix matching (`_target`/`_min`/`_max`) is case-sensitive — `kcal_min`
+/// is recognized; `kcal_Min` is silently ignored as a non-suffix key.
 pub fn load_goals(notes_dir: &Path) -> Result<Goals> {
     let path = notes_dir.join("goals.md");
     let empty = Goals {
@@ -34,6 +38,7 @@ pub fn load_goals(notes_dir: &Path) -> Result<Goals> {
         return Ok(empty);
     }
     let content = std::fs::read_to_string(&path)?;
+    let content = content.replace("\r\n", "\n");
     let yaml_str = match extract_frontmatter(&content) {
         Some(s) => s,
         None => return Ok(empty),
@@ -60,13 +65,14 @@ pub fn load_goals(notes_dir: &Path) -> Result<Goals> {
             Some(p) => p,
             None => continue,
         };
-        let value = yaml_to_f64(&v).ok_or_else(|| {
-            color_eyre::eyre::eyre!(
-                "goals.md `{key}` must be a number, got: {}",
-                yaml_to_display(&v)
-            )
-        })
-        .suggestion("Set numeric values like `kcal_min: 1900`.")?;
+        let value = yaml_to_f64(&v)
+            .ok_or_else(|| {
+                color_eyre::eyre::eyre!(
+                    "goals.md `{key}` must be a number, got: {}",
+                    yaml_to_display(&v)
+                )
+            })
+            .suggestion("Set numeric values like `kcal_min: 1900`.")?;
         let entry = thresholds.entry(name.to_string()).or_default();
         match slot {
             "target" => entry.target = Some(value),
@@ -223,5 +229,14 @@ mod tests {
         let g = load_goals(dir.path()).unwrap();
         let t = g.thresholds.get("resting_hr").unwrap();
         assert_eq!(t.max, Some(65.0));
+    }
+
+    #[test]
+    fn handles_crlf_line_endings() {
+        let dir = tempfile::TempDir::new().unwrap();
+        write_goals(dir.path(), "---\r\nkcal_min: 1900\r\n---\r\n");
+        let g = load_goals(dir.path()).unwrap();
+        assert!(g.present);
+        assert_eq!(g.thresholds.get("kcal").unwrap().min, Some(1900.0));
     }
 }
