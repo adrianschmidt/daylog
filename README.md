@@ -143,6 +143,27 @@ daylog note --date 2026-04-29 --time 23:30 "Allegra 10mg"
 daylog bp --time 08:00 141 96 70   # logged at 14:30 — still morning
 ```
 
+After each successful logging command, daylog echoes the line that was
+written and (for `food`) the day's running macro totals, so you can
+verify the right alias matched and see your remaining budget without
+running `daylog today`:
+
+```
+$ daylog food "protein shake" 462g
+Food logged: 2026-05-02 12:02
+  - **12:02** Protein shake (462g) (231 kcal, 47.0g protein, 2.4g carbs, 3.6g fat)
+
+Today so far: 1340 kcal, 95g protein, 50g carbs, 60g fat
+```
+
+Use `--quiet` (or `-q`) for a single-line confirmation, e.g. when
+bulk-logging from scripts:
+
+```
+$ daylog -q food tea
+Food logged: 2026-05-02 14:30 Te, Earl Grey, hot
+```
+
 `[notes.aliases]` in `config.toml` lets you map short keys to
 longer note text:
 

@@ -335,6 +335,7 @@ pub fn execute(
     date_flag: Option<&str>,
     time_flag: Option<&str>,
     config: &Config,
+    quiet: bool,
 ) -> Result<()> {
     if name.trim().is_empty() {
         bail!("Food name required.");
@@ -373,11 +374,29 @@ pub fn execute(
     let updated = crate::body::append_line_to_section(&updated, "Food", &line);
     crate::frontmatter::atomic_write(&note_path, &updated)?;
 
-    eprintln!(
-        "Food logged: {date_str} {formatted_time} {}",
-        entry.display_name
-    );
+    if quiet {
+        eprintln!(
+            "Food logged: {date_str} {formatted_time} {}",
+            entry.display_name
+        );
+    } else {
+        let totals = crate::food_sum::sum_food_section(&updated);
+        eprintln!("Food logged: {date_str} {formatted_time}");
+        eprintln!("  {line}");
+        eprintln!();
+        eprintln!("Today so far: {}", format_food_totals(&totals));
+    }
     Ok(())
+}
+
+fn format_food_totals(t: &crate::food_sum::FoodTotals) -> String {
+    format!(
+        "{} kcal, {}g protein, {}g carbs, {}g fat",
+        t.kcal.round() as i64,
+        t.protein.round() as i64,
+        t.carbs.round() as i64,
+        t.fat.round() as i64,
+    )
 }
 
 fn require_custom_complete(
@@ -834,6 +853,7 @@ mod tests {
             None,
             Some("12:42"),
             &config,
+            true,
         )
         .unwrap();
 
@@ -864,6 +884,7 @@ mod tests {
             None,
             Some("13:00"),
             &config,
+            true,
         )
         .unwrap();
 
@@ -889,6 +910,7 @@ mod tests {
             None,
             Some("13:00"),
             &config,
+            true,
         )
         .unwrap_err();
         assert!(err.to_string().contains("Custom mode requires"));
@@ -912,6 +934,7 @@ mod tests {
             None,
             Some("12:42"),
             &config,
+            true,
         )
         .unwrap_err();
         let msg = err.to_string();
@@ -937,6 +960,7 @@ mod tests {
             None,
             Some("12:42"),
             &config,
+            true,
         )
         .unwrap_err();
         assert!(err.to_string().contains("No nutrition entry"));
@@ -960,6 +984,7 @@ mod tests {
             Some("2026-04-29"),
             Some("22:00"),
             &config,
+            true,
         )
         .unwrap();
 
@@ -987,6 +1012,7 @@ mod tests {
             None,
             Some("12:42"),
             &config,
+            true,
         )
         .unwrap();
 
@@ -1016,6 +1042,7 @@ mod tests {
             None,
             Some("12:42"),
             &config,
+            true,
         )
         .unwrap();
 
@@ -1045,6 +1072,7 @@ mod tests {
             None,
             Some("12:42"),
             &config,
+            true,
         )
         .unwrap();
 
@@ -1071,11 +1099,63 @@ mod tests {
             None,
             Some("12:42"),
             &config,
+            true,
         )
         .unwrap();
 
         let note = read_today(dir.path(), &config);
         assert!(note.contains("II ~99"), "expected --ii override:\n{note}");
         assert!(!note.contains("II ~35"), "DB ii should not appear:\n{note}");
+    }
+
+    #[test]
+    fn format_food_totals_rounds_to_int_units() {
+        let t = crate::food_sum::FoodTotals {
+            kcal: 1340.4,
+            protein: 95.6,
+            carbs: 50.0,
+            fat: 60.2,
+            entry_count: 0,
+            skipped_lines: 0,
+        };
+        // Rounding follows i64 cast of .round(): 1340, 96, 50, 60.
+        assert_eq!(
+            format_food_totals(&t),
+            "1340 kcal, 96g protein, 50g carbs, 60g fat"
+        );
+    }
+
+    #[test]
+    fn execute_verbose_mode_writes_file_unchanged() {
+        // quiet=false (verbose) hits the totals-summing path; ensure the
+        // file content is identical to quiet=true so output formatting
+        // doesn't accidentally affect persistence.
+        let dir = tempfile::TempDir::new().unwrap();
+        let config = config_in(dir.path());
+
+        execute(
+            "Random pasta",
+            Some("500g"),
+            Some(350.0),
+            Some(7.0),
+            Some(24.0),
+            Some(25.0),
+            None,
+            None,
+            None,
+            None,
+            Some("13:00"),
+            &config,
+            false,
+        )
+        .unwrap();
+
+        let note = read_today(dir.path(), &config);
+        assert!(
+            note.contains(
+                "- **13:00** Random pasta (500g) (350 kcal, 7.0g protein, 24.0g carbs, 25.0g fat)"
+            ),
+            "got:\n{note}"
+        );
     }
 }
