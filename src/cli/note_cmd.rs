@@ -13,6 +13,7 @@ pub fn execute(
     date_flag: Option<&str>,
     time_flag: Option<&str>,
     config: &Config,
+    quiet: bool,
 ) -> Result<()> {
     if text.is_empty() {
         bail!("Note text required.");
@@ -48,7 +49,12 @@ pub fn execute(
     let updated = body::append_line_to_section(&updated, "Notes", &line);
     frontmatter::atomic_write(&note_path, &updated)?;
 
-    eprintln!("Note logged: {date_str} {formatted_time}");
+    if quiet {
+        eprintln!("Note logged: {date_str} {formatted_time}");
+    } else {
+        eprintln!("Note logged: {date_str} {formatted_time}");
+        eprintln!("  {line}");
+    }
     Ok(())
 }
 
@@ -85,6 +91,7 @@ time_format = '24h'
             None,
             Some("12:30"),
             &config,
+            true,
         )
         .unwrap();
 
@@ -97,7 +104,7 @@ time_format = '24h'
     fn note_alias_expands() {
         let dir = tempfile::TempDir::new().unwrap();
         let config = config_with_alias(dir.path(), "med-morning", "Morgonmedicin (Elvanse 70mg)");
-        execute(&["med-morning".into()], None, Some("07:55"), &config).unwrap();
+        execute(&["med-morning".into()], None, Some("07:55"), &config, true).unwrap();
 
         let note = read_today(dir.path(), &config);
         assert!(
@@ -110,7 +117,7 @@ time_format = '24h'
     fn note_alias_falls_through_when_missing() {
         let dir = tempfile::TempDir::new().unwrap();
         let config = config_with_alias(dir.path(), "med-morning", "expanded");
-        execute(&["unknown-key".into()], None, Some("08:00"), &config).unwrap();
+        execute(&["unknown-key".into()], None, Some("08:00"), &config, true).unwrap();
 
         let note = read_today(dir.path(), &config);
         assert!(note.contains("- **08:00** unknown-key"), "got:\n{note}");
@@ -121,7 +128,7 @@ time_format = '24h'
     fn note_empty_text_errors() {
         let dir = tempfile::TempDir::new().unwrap();
         let config = config_with_alias(dir.path(), "ignored", "ignored");
-        let err = execute(&[], None, Some("08:00"), &config).unwrap_err();
+        let err = execute(&[], None, Some("08:00"), &config, true).unwrap_err();
         assert!(err.to_string().contains("Note text required"));
     }
 
@@ -134,6 +141,7 @@ time_format = '24h'
             Some("2026-04-29"),
             Some("23:59"),
             &config,
+            true,
         )
         .unwrap();
 
@@ -145,7 +153,14 @@ time_format = '24h'
     fn note_invalid_date_errors() {
         let dir = tempfile::TempDir::new().unwrap();
         let config = config_with_alias(dir.path(), "ignored", "ignored");
-        let err = execute(&["x".into()], Some("2026-13-45"), Some("08:00"), &config).unwrap_err();
+        let err = execute(
+            &["x".into()],
+            Some("2026-13-45"),
+            Some("08:00"),
+            &config,
+            true,
+        )
+        .unwrap_err();
         assert!(err.to_string().contains("Invalid --date"));
     }
 
@@ -153,7 +168,7 @@ time_format = '24h'
     fn note_invalid_time_errors() {
         let dir = tempfile::TempDir::new().unwrap();
         let config = config_with_alias(dir.path(), "ignored", "ignored");
-        let err = execute(&["x".into()], None, Some("25:00"), &config).unwrap_err();
+        let err = execute(&["x".into()], None, Some("25:00"), &config, true).unwrap_err();
         assert!(err.to_string().contains("Invalid --time"));
     }
 
@@ -169,7 +184,7 @@ time_format = '12h'
         );
         let config: Config = toml::from_str(&toml_str).unwrap();
 
-        execute(&["Coffee".into()], None, Some("13:30"), &config).unwrap();
+        execute(&["Coffee".into()], None, Some("13:30"), &config, true).unwrap();
         let note = read_today(dir.path(), &config);
         assert!(note.contains("- **1:30pm** Coffee"), "got:\n{note}");
     }

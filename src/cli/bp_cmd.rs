@@ -63,6 +63,7 @@ pub fn execute(
     date_flag: Option<&str>,
     time_flag: Option<&str>,
     config: &Config,
+    quiet: bool,
 ) -> Result<()> {
     if morning && evening {
         // clap's `conflicts_with` should already block this, but keep a
@@ -95,7 +96,12 @@ pub fn execute(
     let updated = body::append_line_to_section(&updated, "Vitals", &body_line);
 
     frontmatter::atomic_write(&note_path, &updated)?;
-    eprintln!("BP logged: {date_str} {formatted_time} {sys}/{dia}, pulse {pulse} bpm ({slot})");
+    if quiet {
+        eprintln!("BP logged: {date_str} {formatted_time} {sys}/{dia}, pulse {pulse} bpm ({slot})");
+    } else {
+        eprintln!("BP logged: {date_str} {formatted_time} ({slot})");
+        eprintln!("  {body_line}");
+    }
     Ok(())
 }
 
@@ -162,7 +168,18 @@ mod tests {
     fn writes_three_yaml_fields_for_morning() {
         let dir = tempfile::TempDir::new().unwrap();
         let config = config_in(dir.path(), "24h");
-        execute(141, 96, 70, false, false, None, Some("07:30"), &config).unwrap();
+        execute(
+            141,
+            96,
+            70,
+            false,
+            false,
+            None,
+            Some("07:30"),
+            &config,
+            true,
+        )
+        .unwrap();
 
         let note = read_today(dir.path(), &config);
         assert!(note.contains("bp_morning_sys: 141"), "got:\n{note}");
@@ -174,7 +191,18 @@ mod tests {
     fn writes_three_yaml_fields_for_evening() {
         let dir = tempfile::TempDir::new().unwrap();
         let config = config_in(dir.path(), "24h");
-        execute(133, 73, 62, false, false, None, Some("18:00"), &config).unwrap();
+        execute(
+            133,
+            73,
+            62,
+            false,
+            false,
+            None,
+            Some("18:00"),
+            &config,
+            true,
+        )
+        .unwrap();
 
         let note = read_today(dir.path(), &config);
         assert!(note.contains("bp_evening_sys: 133"), "got:\n{note}");
@@ -186,7 +214,18 @@ mod tests {
     fn vitals_line_has_no_slot_suffix_and_includes_bpm() {
         let dir = tempfile::TempDir::new().unwrap();
         let config = config_in(dir.path(), "24h");
-        execute(141, 96, 70, false, false, None, Some("07:30"), &config).unwrap();
+        execute(
+            141,
+            96,
+            70,
+            false,
+            false,
+            None,
+            Some("07:30"),
+            &config,
+            true,
+        )
+        .unwrap();
 
         let note = read_today(dir.path(), &config);
         assert!(
@@ -201,7 +240,7 @@ mod tests {
     fn explicit_evening_overrides_time() {
         let dir = tempfile::TempDir::new().unwrap();
         let config = config_in(dir.path(), "24h");
-        execute(133, 73, 62, false, true, None, Some("09:00"), &config).unwrap();
+        execute(133, 73, 62, false, true, None, Some("09:00"), &config, true).unwrap();
 
         let note = read_today(dir.path(), &config);
         assert!(note.contains("bp_evening_sys: 133"));
@@ -212,8 +251,30 @@ mod tests {
     fn rerun_morning_overwrites_yaml_appends_vitals() {
         let dir = tempfile::TempDir::new().unwrap();
         let config = config_in(dir.path(), "24h");
-        execute(140, 95, 70, false, false, None, Some("07:00"), &config).unwrap();
-        execute(135, 90, 65, false, false, None, Some("07:30"), &config).unwrap();
+        execute(
+            140,
+            95,
+            70,
+            false,
+            false,
+            None,
+            Some("07:00"),
+            &config,
+            true,
+        )
+        .unwrap();
+        execute(
+            135,
+            90,
+            65,
+            false,
+            false,
+            None,
+            Some("07:30"),
+            &config,
+            true,
+        )
+        .unwrap();
 
         let note = read_today(dir.path(), &config);
         // YAML overwritten in place: only the second value present.
@@ -228,7 +289,18 @@ mod tests {
     fn creates_vitals_section_if_missing() {
         let dir = tempfile::TempDir::new().unwrap();
         let config = config_in(dir.path(), "24h");
-        execute(141, 96, 70, false, false, None, Some("07:30"), &config).unwrap();
+        execute(
+            141,
+            96,
+            70,
+            false,
+            false,
+            None,
+            Some("07:30"),
+            &config,
+            true,
+        )
+        .unwrap();
 
         let note = read_today(dir.path(), &config);
         assert!(note.contains("## Vitals"));
@@ -247,6 +319,7 @@ mod tests {
             Some("2026-04-29"),
             Some("07:30"),
             &config,
+            true,
         )
         .unwrap();
 
@@ -269,6 +342,7 @@ mod tests {
             Some("2026-13-45"),
             Some("07:30"),
             &config,
+            true,
         )
         .unwrap_err();
         assert!(err.to_string().contains("Invalid --date"));
@@ -278,7 +352,18 @@ mod tests {
     fn invalid_time_errors() {
         let dir = tempfile::TempDir::new().unwrap();
         let config = config_in(dir.path(), "24h");
-        let err = execute(141, 96, 70, false, false, None, Some("25:00"), &config).unwrap_err();
+        let err = execute(
+            141,
+            96,
+            70,
+            false,
+            false,
+            None,
+            Some("25:00"),
+            &config,
+            true,
+        )
+        .unwrap_err();
         assert!(err.to_string().contains("Invalid --time"));
     }
 }

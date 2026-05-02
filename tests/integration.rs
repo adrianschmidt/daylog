@@ -421,7 +421,18 @@ climbing = false
     .unwrap();
     drop(conn);
 
-    daylog::cli::bp_cmd::execute(141, 96, 70, false, false, None, Some("07:30"), &config).unwrap();
+    daylog::cli::bp_cmd::execute(
+        141,
+        96,
+        70,
+        false,
+        false,
+        None,
+        Some("07:30"),
+        &config,
+        true,
+    )
+    .unwrap();
     daylog::cli::food_cmd::execute(
         "kelda skogssvampsoppa",
         Some("500g"),
@@ -435,6 +446,7 @@ climbing = false
         None,
         Some("12:42"),
         &config,
+        true,
     )
     .unwrap();
     daylog::cli::note_cmd::execute(
@@ -442,6 +454,7 @@ climbing = false
         None,
         Some("13:00"),
         &config,
+        true,
     )
     .unwrap();
 

@@ -10,6 +10,7 @@ use daylog::modules;
 fn main() -> Result<()> {
     color_eyre::install()?;
     let cli = Cli::parse();
+    let quiet = cli.quiet;
 
     match cli.command {
         Some(Commands::Init { notes_dir, no_demo }) => cmd_init(notes_dir, no_demo),
@@ -41,9 +42,9 @@ fn main() -> Result<()> {
             date,
             time,
         }) => cmd_food(
-            name, amount, kcal, protein, carbs, fat, gi, gl, ii, date, time,
+            name, amount, kcal, protein, carbs, fat, gi, gl, ii, date, time, quiet,
         ),
-        Some(Commands::Note { text, date, time }) => cmd_note(text, date, time),
+        Some(Commands::Note { text, date, time }) => cmd_note(text, date, time, quiet),
         Some(Commands::Bp {
             sys,
             dia,
@@ -52,7 +53,7 @@ fn main() -> Result<()> {
             evening,
             date,
             time,
-        }) => cmd_bp(sys, dia, pulse, morning, evening, date, time),
+        }) => cmd_bp(sys, dia, pulse, morning, evening, date, time, quiet),
         Some(Commands::Today { date, json }) => cmd_today(date, json),
         None => cmd_run(),
     }
@@ -315,6 +316,7 @@ fn cmd_food(
     ii: Option<f64>,
     date: Option<String>,
     time: Option<String>,
+    quiet: bool,
 ) -> Result<()> {
     let config = Config::load()?;
     daylog::cli::food_cmd::execute(
@@ -330,14 +332,21 @@ fn cmd_food(
         date.as_deref(),
         time.as_deref(),
         &config,
+        quiet,
     )
 }
 
-fn cmd_note(text: Vec<String>, date: Option<String>, time: Option<String>) -> Result<()> {
+fn cmd_note(
+    text: Vec<String>,
+    date: Option<String>,
+    time: Option<String>,
+    quiet: bool,
+) -> Result<()> {
     let config = Config::load()?;
-    daylog::cli::note_cmd::execute(&text, date.as_deref(), time.as_deref(), &config)
+    daylog::cli::note_cmd::execute(&text, date.as_deref(), time.as_deref(), &config, quiet)
 }
 
+#[allow(clippy::too_many_arguments)]
 fn cmd_bp(
     sys: i32,
     dia: i32,
@@ -346,6 +355,7 @@ fn cmd_bp(
     evening: bool,
     date: Option<String>,
     time: Option<String>,
+    quiet: bool,
 ) -> Result<()> {
     let config = Config::load()?;
     daylog::cli::bp_cmd::execute(
@@ -357,6 +367,7 @@ fn cmd_bp(
         date.as_deref(),
         time.as_deref(),
         &config,
+        quiet,
     )
 }
 

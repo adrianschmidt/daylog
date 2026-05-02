@@ -17,6 +17,11 @@ use clap_complete::Shell;
     about = "A terminal dashboard that tracks your life from markdown notes"
 )]
 pub struct Cli {
+    /// Suppress the full-line + totals confirmation from `food`/`note`/`bp`/`log`;
+    /// emit just the existing one-line `<thing> logged: ...` summary.
+    #[arg(short, long, global = true)]
+    pub quiet: bool,
+
     #[command(subcommand)]
     pub command: Option<Commands>,
 }
