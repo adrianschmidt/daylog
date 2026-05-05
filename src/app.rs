@@ -109,7 +109,7 @@ fn draw(f: &mut ratatui::Frame, app: &App, conn: &rusqlite::Connection, config: 
     let tab_titles: Vec<Line> = app.modules.iter().map(|m| m.name().into()).collect();
     let tabs = Tabs::new(tab_titles)
         .select(app.selected_tab)
-        .block(Block::default().borders(Borders::ALL).title(" daylog "))
+        .block(Block::default().borders(Borders::ALL).title(" vitalog "))
         .highlight_style(
             Style::default()
                 .fg(Color::Cyan)
@@ -278,7 +278,7 @@ pub fn run() -> Result<()> {
             let new_ids = enabled_ids(&config);
             if new_ids != app.enabled_module_ids {
                 app.config_changed_msg =
-                    Some(" Module change detected. Restart daylog to apply.".to_string());
+                    Some(" Module change detected. Restart vitalog to apply.".to_string());
             }
             app.last_refresh = Instant::now();
         }

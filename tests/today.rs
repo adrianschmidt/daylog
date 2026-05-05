@@ -1,11 +1,11 @@
 //! End-to-end test for `daylog today`.
 
 use chrono::NaiveDate;
-use daylog::cli::today_cmd::{assemble, render_json, render_text};
-use daylog::config::Config;
-use daylog::db;
-use daylog::goals::load_goals;
-use daylog::modules;
+use vitalog::cli::today_cmd::{assemble, render_json, render_text};
+use vitalog::config::Config;
+use vitalog::db;
+use vitalog::goals::load_goals;
+use vitalog::modules;
 
 fn setup() -> (tempfile::TempDir, Config) {
     let dir = tempfile::TempDir::new().unwrap();
@@ -76,7 +76,7 @@ fn end_to_end_today_text_and_json() {
     let conn = db::open_rw(&config.db_path()).unwrap();
     db::init_db(&conn, &registry).unwrap();
     modules::validate_module_tables(&registry).unwrap();
-    daylog::materializer::sync_all(&conn, &config.notes_dir_path(), &config, &registry).unwrap();
+    vitalog::materializer::sync_all(&conn, &config.notes_dir_path(), &config, &registry).unwrap();
 
     let date = NaiveDate::from_ymd_opt(2026, 4, 30).unwrap();
     let summary = assemble(date, &config, &conn).unwrap();
@@ -122,7 +122,7 @@ fn end_to_end_today_no_goals_emits_hint() {
     let conn = db::open_rw(&config.db_path()).unwrap();
     db::init_db(&conn, &registry).unwrap();
     modules::validate_module_tables(&registry).unwrap();
-    daylog::materializer::sync_all(&conn, &config.notes_dir_path(), &config, &registry).unwrap();
+    vitalog::materializer::sync_all(&conn, &config.notes_dir_path(), &config, &registry).unwrap();
 
     let date = NaiveDate::from_ymd_opt(2026, 4, 30).unwrap();
     let summary = assemble(date, &config, &conn).unwrap();

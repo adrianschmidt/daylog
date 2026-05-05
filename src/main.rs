@@ -2,10 +2,10 @@ use clap::Parser;
 use color_eyre::eyre::{Result, WrapErr};
 use std::io::{IsTerminal, Write};
 
-use daylog::cli::{Cli, Commands};
-use daylog::config::{self, Config};
-use daylog::db;
-use daylog::modules;
+use vitalog::cli::{Cli, Commands};
+use vitalog::config::{self, Config};
+use vitalog::db;
+use vitalog::modules;
 
 fn main() -> Result<()> {
     color_eyre::install()?;
@@ -20,11 +20,11 @@ fn main() -> Result<()> {
         Some(Commands::Edit { date }) => cmd_edit(date.as_deref()),
         Some(Commands::Rebuild) => cmd_rebuild(),
         Some(Commands::Completions { shell }) => {
-            daylog::cli::completions::generate(shell);
+            vitalog::cli::completions::generate(shell);
             Ok(())
         }
         Some(Commands::Readme) => {
-            daylog::cli::readme_cmd::execute();
+            vitalog::cli::readme_cmd::execute();
             Ok(())
         }
         Some(Commands::SleepStart { time }) => cmd_sleep_start(time.as_deref()),
@@ -61,12 +61,12 @@ fn main() -> Result<()> {
 
 fn cmd_sleep_start(time: Option<&str>) -> Result<()> {
     let config = Config::load()?;
-    daylog::cli::sleep_cmd::cmd_sleep_start(time, &config)
+    vitalog::cli::sleep_cmd::cmd_sleep_start(time, &config)
 }
 
 fn cmd_sleep_end(time: Option<&str>) -> Result<()> {
     let config = Config::load()?;
-    daylog::cli::sleep_cmd::cmd_sleep_end(time, &config)
+    vitalog::cli::sleep_cmd::cmd_sleep_end(time, &config)
 }
 
 fn cmd_init(notes_dir_arg: Option<String>, no_demo: bool) -> Result<()> {
@@ -138,7 +138,7 @@ fn cmd_init(notes_dir_arg: Option<String>, no_demo: bool) -> Result<()> {
         };
 
         if should_demo {
-            let count = daylog::demo::generate_demo_data(&notes_path)?;
+            let count = vitalog::demo::generate_demo_data(&notes_path)?;
             eprintln!("Generated {count} days of demo data");
         }
     }
@@ -151,7 +151,7 @@ fn cmd_init(notes_dir_arg: Option<String>, no_demo: bool) -> Result<()> {
     db::init_db(&conn, &registry)?;
     modules::validate_module_tables(&registry)?;
     let (synced, errors) =
-        daylog::materializer::sync_all(&conn, &config.notes_dir_path(), &config, &registry)?;
+        vitalog::materializer::sync_all(&conn, &config.notes_dir_path(), &config, &registry)?;
     if synced > 0 {
         eprintln!("Synced {synced} notes to database");
     }
@@ -166,7 +166,7 @@ fn cmd_init(notes_dir_arg: Option<String>, no_demo: bool) -> Result<()> {
 fn cmd_log(field: &str, value: &[String]) -> Result<()> {
     let config = Config::load()?;
     let registry = modules::build_registry(&config);
-    daylog::cli::log_cmd::execute(field, value, &config, &registry)
+    vitalog::cli::log_cmd::execute(field, value, &config, &registry)
 }
 
 fn cmd_status() -> Result<()> {
@@ -202,11 +202,11 @@ fn cmd_status() -> Result<()> {
 
     // Surface pending sleep state so scripts and `--json` consumers can see
     // a sleep-in-progress (between `daylog sleep-start` and `daylog sleep-end`).
-    let pending = daylog::state::load(&config.notes_dir_path());
+    let pending = vitalog::state::load(&config.notes_dir_path());
     if let Some(p) = pending.sleep_start {
         output["pending"] = serde_json::json!({
             "sleep_start": {
-                "bedtime": daylog::time::format_time(p.bedtime, config.time_format),
+                "bedtime": vitalog::time::format_time(p.bedtime, config.time_format),
                 "recorded_at": p.recorded_at.to_rfc3339(),
             }
         });
@@ -231,7 +231,7 @@ fn cmd_sync() -> Result<()> {
     modules::validate_module_tables(&registry)?;
 
     let (synced, errors) =
-        daylog::materializer::sync_all(&conn, &config.notes_dir_path(), &config, &registry)?;
+        vitalog::materializer::sync_all(&conn, &config.notes_dir_path(), &config, &registry)?;
     eprintln!("Synced {synced} files ({errors} errors)");
     if errors > 0 {
         std::process::exit(1);
@@ -248,7 +248,7 @@ fn cmd_edit(date: Option<&str>) -> Result<()> {
     let note_path = config.notes_dir_path().join(format!("{date_str}.md"));
 
     if !note_path.exists() {
-        let content = daylog::template::render_daily_note(&date_str, &config);
+        let content = vitalog::template::render_daily_note(&date_str, &config);
         std::fs::write(&note_path, content)?;
     }
 
@@ -291,7 +291,7 @@ fn cmd_rebuild() -> Result<()> {
     modules::validate_module_tables(&registry)?;
 
     let (synced, errors) =
-        daylog::materializer::rebuild_all(&conn, &config.notes_dir_path(), &config, &registry)?;
+        vitalog::materializer::rebuild_all(&conn, &config.notes_dir_path(), &config, &registry)?;
     eprintln!("Rebuilt: {synced} files ({errors} errors)");
     if errors > 0 {
         std::process::exit(1);
@@ -300,7 +300,7 @@ fn cmd_rebuild() -> Result<()> {
 }
 
 fn cmd_run() -> Result<()> {
-    daylog::app::run()
+    vitalog::app::run()
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -319,7 +319,7 @@ fn cmd_food(
     quiet: bool,
 ) -> Result<()> {
     let config = Config::load()?;
-    daylog::cli::food_cmd::execute(
+    vitalog::cli::food_cmd::execute(
         &name,
         amount.as_deref(),
         kcal,
@@ -343,7 +343,7 @@ fn cmd_note(
     quiet: bool,
 ) -> Result<()> {
     let config = Config::load()?;
-    daylog::cli::note_cmd::execute(&text, date.as_deref(), time.as_deref(), &config, quiet)
+    vitalog::cli::note_cmd::execute(&text, date.as_deref(), time.as_deref(), &config, quiet)
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -358,7 +358,7 @@ fn cmd_bp(
     quiet: bool,
 ) -> Result<()> {
     let config = Config::load()?;
-    daylog::cli::bp_cmd::execute(
+    vitalog::cli::bp_cmd::execute(
         sys,
         dia,
         pulse,
@@ -373,5 +373,5 @@ fn cmd_bp(
 
 fn cmd_today(date: Option<String>, json: bool) -> Result<()> {
     let config = Config::load()?;
-    daylog::cli::today_cmd::execute(date.as_deref(), json, &config)
+    vitalog::cli::today_cmd::execute(date.as_deref(), json, &config)
 }

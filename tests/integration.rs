@@ -1,6 +1,6 @@
-use daylog::config::Config;
-use daylog::db;
-use daylog::modules;
+use vitalog::config::Config;
+use vitalog::db;
+use vitalog::modules;
 
 fn setup_test_env() -> (tempfile::TempDir, Config) {
     let dir = tempfile::TempDir::new().unwrap();
@@ -45,18 +45,19 @@ fn test_full_roundtrip() {
     let _conn = setup_db(&config, &registry);
 
     // 1. Log several values
-    daylog::cli::log_cmd::execute("weight", &["173.4".into()], &config, &registry).unwrap();
-    daylog::cli::log_cmd::execute("mood", &["4".into()], &config, &registry).unwrap();
-    daylog::cli::log_cmd::execute("energy", &["3".into()], &config, &registry).unwrap();
-    daylog::cli::log_cmd::execute("sleep", &["10:30pm-6:15am".into()], &config, &registry).unwrap();
-    daylog::cli::log_cmd::execute(
+    vitalog::cli::log_cmd::execute("weight", &["173.4".into()], &config, &registry).unwrap();
+    vitalog::cli::log_cmd::execute("mood", &["4".into()], &config, &registry).unwrap();
+    vitalog::cli::log_cmd::execute("energy", &["3".into()], &config, &registry).unwrap();
+    vitalog::cli::log_cmd::execute("sleep", &["10:30pm-6:15am".into()], &config, &registry)
+        .unwrap();
+    vitalog::cli::log_cmd::execute(
         "lift",
         &["squat".into(), "185x5,".into(), "205x3".into()],
         &config,
         &registry,
     )
     .unwrap();
-    daylog::cli::log_cmd::execute(
+    vitalog::cli::log_cmd::execute(
         "metric",
         &["resting_hr".into(), "52".into()],
         &config,
@@ -79,7 +80,7 @@ fn test_full_roundtrip() {
     let conn = db::open_rw(&config.db_path()).unwrap();
     db::init_db(&conn, &registry).unwrap();
     let (synced, errors) =
-        daylog::materializer::sync_all(&conn, &config.notes_dir_path(), &config, &registry)
+        vitalog::materializer::sync_all(&conn, &config.notes_dir_path(), &config, &registry)
             .unwrap();
     assert_eq!(synced, 1, "Should sync 1 file");
     assert_eq!(errors, 0, "Should have 0 errors");
@@ -129,7 +130,7 @@ fn test_demo_data_roundtrip() {
     let registry = modules::build_registry(&config);
 
     // Generate demo data
-    let count = daylog::demo::generate_demo_data(dir.path()).unwrap();
+    let count = vitalog::demo::generate_demo_data(dir.path()).unwrap();
     assert_eq!(count, 14);
 
     // Sync all
@@ -137,7 +138,7 @@ fn test_demo_data_roundtrip() {
     db::init_db(&conn, &registry).unwrap();
     modules::validate_module_tables(&registry).unwrap();
     let (synced, errors) =
-        daylog::materializer::rebuild_all(&conn, &config.notes_dir_path(), &config, &registry)
+        vitalog::materializer::rebuild_all(&conn, &config.notes_dir_path(), &config, &registry)
             .unwrap();
     assert_eq!(synced, 14);
     assert_eq!(errors, 0);
@@ -166,23 +167,23 @@ fn test_validation_rejects_garbage() {
     let registry = modules::build_registry(&config);
 
     // Invalid weight
-    let result = daylog::cli::log_cmd::execute("weight", &["banana".into()], &config, &registry);
+    let result = vitalog::cli::log_cmd::execute("weight", &["banana".into()], &config, &registry);
     assert!(result.is_err());
 
     // Mood out of range
-    let result = daylog::cli::log_cmd::execute("mood", &["999".into()], &config, &registry);
+    let result = vitalog::cli::log_cmd::execute("mood", &["999".into()], &config, &registry);
     assert!(result.is_err());
 
     // Energy zero
-    let result = daylog::cli::log_cmd::execute("energy", &["0".into()], &config, &registry);
+    let result = vitalog::cli::log_cmd::execute("energy", &["0".into()], &config, &registry);
     assert!(result.is_err());
 
     // Bad sleep format
-    let result = daylog::cli::log_cmd::execute("sleep", &["whenever".into()], &config, &registry);
+    let result = vitalog::cli::log_cmd::execute("sleep", &["whenever".into()], &config, &registry);
     assert!(result.is_err());
 
     // Unknown field
-    let result = daylog::cli::log_cmd::execute("banana", &["123".into()], &config, &registry);
+    let result = vitalog::cli::log_cmd::execute("banana", &["123".into()], &config, &registry);
     assert!(result.is_err());
 }
 
@@ -192,7 +193,7 @@ fn test_rebuild_is_idempotent() {
     let (dir, config) = setup_test_env();
     let registry = modules::build_registry(&config);
 
-    daylog::demo::generate_demo_data(dir.path()).unwrap();
+    vitalog::demo::generate_demo_data(dir.path()).unwrap();
 
     let conn = db::open_rw(&config.db_path()).unwrap();
     db::init_db(&conn, &registry).unwrap();
@@ -200,13 +201,13 @@ fn test_rebuild_is_idempotent() {
 
     // First build
     let (s1, e1) =
-        daylog::materializer::rebuild_all(&conn, &config.notes_dir_path(), &config, &registry)
+        vitalog::materializer::rebuild_all(&conn, &config.notes_dir_path(), &config, &registry)
             .unwrap();
     assert_eq!(e1, 0);
 
     // Second build (should produce identical results)
     let (s2, e2) =
-        daylog::materializer::rebuild_all(&conn, &config.notes_dir_path(), &config, &registry)
+        vitalog::materializer::rebuild_all(&conn, &config.notes_dir_path(), &config, &registry)
             .unwrap();
     assert_eq!(s1, s2);
     assert_eq!(e2, 0);
@@ -233,18 +234,18 @@ fn sync_all_includes_nutrition_db() {
     .unwrap();
 
     let db_path = notes_dir.join(".daylog.db");
-    let config: daylog::config::Config = toml::from_str(&format!(
+    let config: vitalog::config::Config = toml::from_str(&format!(
         "notes_dir = '{}'\n",
         notes_dir.display().to_string().replace('\\', "/")
     ))
     .unwrap();
-    let registry = daylog::modules::build_registry(&config);
-    let conn = daylog::db::open_rw(&db_path).unwrap();
-    daylog::db::init_db(&conn, &registry).unwrap();
-    daylog::modules::validate_module_tables(&registry).unwrap();
+    let registry = vitalog::modules::build_registry(&config);
+    let conn = vitalog::db::open_rw(&db_path).unwrap();
+    vitalog::db::init_db(&conn, &registry).unwrap();
+    vitalog::modules::validate_module_tables(&registry).unwrap();
 
     let (synced, errors) =
-        daylog::materializer::sync_all(&conn, notes_dir, &config, &registry).unwrap();
+        vitalog::materializer::sync_all(&conn, notes_dir, &config, &registry).unwrap();
     assert_eq!(errors, 0);
     assert!(synced >= 2, "expected at least 2 synced (1 note + 1 db)");
 
@@ -265,24 +266,24 @@ fn rebuild_reparses_nutrition_unconditionally() {
     .unwrap();
 
     let db_path = notes_dir.join(".daylog.db");
-    let config: daylog::config::Config = toml::from_str(&format!(
+    let config: vitalog::config::Config = toml::from_str(&format!(
         "notes_dir = '{}'\n",
         notes_dir.display().to_string().replace('\\', "/")
     ))
     .unwrap();
-    let registry = daylog::modules::build_registry(&config);
-    let conn = daylog::db::open_rw(&db_path).unwrap();
-    daylog::db::init_db(&conn, &registry).unwrap();
-    daylog::modules::validate_module_tables(&registry).unwrap();
+    let registry = vitalog::modules::build_registry(&config);
+    let conn = vitalog::db::open_rw(&db_path).unwrap();
+    vitalog::db::init_db(&conn, &registry).unwrap();
+    vitalog::modules::validate_module_tables(&registry).unwrap();
 
-    daylog::materializer::sync_all(&conn, notes_dir, &config, &registry).unwrap();
+    vitalog::materializer::sync_all(&conn, notes_dir, &config, &registry).unwrap();
     // Mark sync time in the future so a normal sync_all would skip the file.
     let future = std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap()
         .as_secs_f64()
         + 86_400.0;
-    daylog::db::set_last_sync(&conn, future).unwrap();
+    vitalog::db::set_last_sync(&conn, future).unwrap();
     // Tweak the file to simulate an updated value but with stale mtime
     // is impossible portably; rebuild should run regardless of mtime.
     std::fs::write(
@@ -291,7 +292,7 @@ fn rebuild_reparses_nutrition_unconditionally() {
     )
     .unwrap();
 
-    daylog::materializer::rebuild_all(&conn, notes_dir, &config, &registry).unwrap();
+    vitalog::materializer::rebuild_all(&conn, notes_dir, &config, &registry).unwrap();
 
     let kcal: f64 = conn
         .query_row(
@@ -315,18 +316,18 @@ fn sync_all_silent_when_nutrition_db_missing() {
     // No nutrition-db.md.
 
     let db_path = notes_dir.join(".daylog.db");
-    let config: daylog::config::Config = toml::from_str(&format!(
+    let config: vitalog::config::Config = toml::from_str(&format!(
         "notes_dir = '{}'\n",
         notes_dir.display().to_string().replace('\\', "/")
     ))
     .unwrap();
-    let registry = daylog::modules::build_registry(&config);
-    let conn = daylog::db::open_rw(&db_path).unwrap();
-    daylog::db::init_db(&conn, &registry).unwrap();
-    daylog::modules::validate_module_tables(&registry).unwrap();
+    let registry = vitalog::modules::build_registry(&config);
+    let conn = vitalog::db::open_rw(&db_path).unwrap();
+    vitalog::db::init_db(&conn, &registry).unwrap();
+    vitalog::modules::validate_module_tables(&registry).unwrap();
 
     let (_synced, errors) =
-        daylog::materializer::sync_all(&conn, notes_dir, &config, &registry).unwrap();
+        vitalog::materializer::sync_all(&conn, notes_dir, &config, &registry).unwrap();
     assert_eq!(errors, 0);
 
     let foods_count: i64 = conn
@@ -346,19 +347,19 @@ fn status_json_includes_nutrition_db() {
     .unwrap();
 
     let db_path = notes_dir.join(".daylog.db");
-    let config: daylog::config::Config = toml::from_str(&format!(
+    let config: vitalog::config::Config = toml::from_str(&format!(
         "notes_dir = '{}'\n",
         notes_dir.display().to_string().replace('\\', "/")
     ))
     .unwrap();
-    let registry = daylog::modules::build_registry(&config);
-    let conn = daylog::db::open_rw(&db_path).unwrap();
-    daylog::db::init_db(&conn, &registry).unwrap();
-    daylog::modules::validate_module_tables(&registry).unwrap();
+    let registry = vitalog::modules::build_registry(&config);
+    let conn = vitalog::db::open_rw(&db_path).unwrap();
+    vitalog::db::init_db(&conn, &registry).unwrap();
+    vitalog::modules::validate_module_tables(&registry).unwrap();
 
-    daylog::materializer::sync_all(&conn, notes_dir, &config, &registry).unwrap();
+    vitalog::materializer::sync_all(&conn, notes_dir, &config, &registry).unwrap();
 
-    let status = daylog::db::nutrition_status(&conn).unwrap();
+    let status = vitalog::db::nutrition_status(&conn).unwrap();
     assert_eq!(status.foods_count, 1);
     assert!(status.last_synced.is_some());
 }
@@ -368,7 +369,7 @@ fn status_json_includes_nutrition_db() {
 /// with their respective entries.
 #[test]
 fn test_food_note_bp_full_day() {
-    use daylog::db::{FoodInsert, NutrientPanel};
+    use vitalog::db::{FoodInsert, NutrientPanel};
 
     let dir = tempfile::TempDir::new().unwrap();
     let notes_dir = dir.path().to_path_buf();
@@ -385,7 +386,7 @@ trends = true
 climbing = false
 "#
     );
-    let config: daylog::config::Config = toml::from_str(&toml_str).unwrap();
+    let config: vitalog::config::Config = toml::from_str(&toml_str).unwrap();
     let registry = modules::build_registry(&config);
     let _conn = setup_db(&config, &registry);
 
@@ -421,7 +422,7 @@ climbing = false
     .unwrap();
     drop(conn);
 
-    daylog::cli::bp_cmd::execute(
+    vitalog::cli::bp_cmd::execute(
         141,
         96,
         70,
@@ -433,7 +434,7 @@ climbing = false
         true,
     )
     .unwrap();
-    daylog::cli::food_cmd::execute(
+    vitalog::cli::food_cmd::execute(
         "kelda skogssvampsoppa",
         Some("500g"),
         None,
@@ -449,7 +450,7 @@ climbing = false
         true,
     )
     .unwrap();
-    daylog::cli::note_cmd::execute(
+    vitalog::cli::note_cmd::execute(
         &["Attentin".into(), "10mg".into()],
         None,
         Some("13:00"),
