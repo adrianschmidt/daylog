@@ -1,4 +1,4 @@
-# daylog development commands
+# vitalog development commands
 
 default:
     @just --list
@@ -72,4 +72,4 @@ install:
 # Check binary size
 size:
     @cargo build --release 2>/dev/null
-    @ls -lh target/release/daylog | awk '{print $5}'
+    @ls -lh target/release/vitalog | awk '{print $5}'

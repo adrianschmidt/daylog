@@ -1,4 +1,4 @@
-# daylog
+# vitalog
 
 A terminal dashboard that tracks your life from markdown notes. Single binary, no async, no external APIs.
 
@@ -52,12 +52,12 @@ src/
                        Pure functions over &str.
   cli/
     mod.rs             Clap CLI definition
-    bp_cmd.rs          `daylog bp` — slot dispatch + YAML scalars + Vitals line
+    bp_cmd.rs          `vitalog bp` — slot dispatch + YAML scalars + Vitals line
     completions.rs     Shell completion generation
-    food_cmd.rs        `daylog food` — nutrition-db lookup, scaling, custom flags
-    log_cmd.rs         `daylog log` — write to today's note
-    note_cmd.rs        `daylog note` — alias resolution + body append
-    readme_cmd.rs      `daylog readme` — print embedded README.md to stdout
+    food_cmd.rs        `vitalog food` — nutrition-db lookup, scaling, custom flags
+    log_cmd.rs         `vitalog log` — write to today's note
+    note_cmd.rs        `vitalog note` — alias resolution + body append
+    readme_cmd.rs      `vitalog readme` — print embedded README.md to stdout
   modules/
     mod.rs             Module trait + registry + InsertOp + YamlPath + parse_color
     dashboard.rs       Today's vitals (sleep, weight, mood, energy)
@@ -97,7 +97,7 @@ just demo           # init + run with demo data
    resting_hr = { display = "Resting HR", color = "red", unit = "bpm" }
    ```
 2. Add to daily note YAML: `resting_hr: 52`
-3. Trends tab auto-renders a sparkline. Run `daylog rebuild` to backfill history.
+3. Trends tab auto-renders a sparkline. Run `vitalog rebuild` to backfill history.
 
 ### Adding an exercise (no code, 1 step)
 
@@ -110,10 +110,10 @@ just demo           # init + run with demo data
 
 ## Debugging
 
-- `daylog rebuild` — delete DB and re-parse all notes
-- `daylog status --json` — inspect current state
-- `daylog sync` — update DB without launching TUI
-- DB is at `{notes_dir}/.daylog.db`, inspectable with `sqlite3`
+- `vitalog rebuild` — delete DB and re-parse all notes
+- `vitalog status --json` — inspect current state
+- `vitalog sync` — update DB without launching TUI
+- DB is at `{notes_dir}/.vitalog.db`, inspectable with `sqlite3`
 - Watcher logs to stderr
 
 ## Code Conventions
@@ -128,5 +128,5 @@ just demo           # init + run with demo data
 
 - Sessions table supports multiple per day (PK is `(date, session_number)`). v1 YAML maps to session_number=1.
 - Module enable/disable requires restart (registry rebuild).
-- `daylog rebuild` is the schema migration answer — fast (<1s for hundreds of notes).
+- `vitalog rebuild` is the schema migration answer — fast (<1s for hundreds of notes).
 - Module registry is compile-time. Community modules require recompiling.
