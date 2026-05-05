@@ -237,10 +237,17 @@ cargo update --workspace --offline 2>/dev/null || cargo update --workspace
 
 ### GitHub App integration
 
-The App `vitalog-release-bot` (App ID 3607258) is installed on
-`adrianschmidt/vitalog` only and is in the Ruleset bypass list. Its
-private key and ID are stored as the repo secrets `APP_PRIVATE_KEY` and
-`APP_ID`. Workflows mint short-lived installation tokens via
+The App `vitalog-release-bot` (App ID 3607258) is installed only on the
+single repo `adrianschmidt/daylog` (which becomes `adrianschmidt/vitalog`
+when the rename is performed on GitHub). It is in the Ruleset bypass
+list of the rule that protects `main`, with bypass mode "Always". The
+repo rename does not require re-installing the App or re-adding it to
+the bypass list: GitHub App installations and Ruleset bypass entries
+are keyed on the repo's stable internal ID, not its name, so both
+follow automatically through a rename.
+
+Its private key and ID are stored as the repo secrets `APP_PRIVATE_KEY`
+and `APP_ID`. Workflows mint short-lived installation tokens via
 `actions/create-github-app-token`:
 
 ```yaml
@@ -354,6 +361,38 @@ Permission is hereby granted, …
   a `CARGO_REGISTRY_TOKEN` secret. Cargo.toml is already kept
   crates.io-friendly (license, description, keywords, categories,
   readme). Adding crates.io requires no architectural changes.
+
+## Deployment sequence
+
+The implementation is staged on a single feature branch
+(`vitalog-rename`). Order of steps to land it:
+
+1. **Implement all code/doc/manifest changes** on the branch using
+   `vitalog` names everywhere. The branch can be pushed and PR-reviewed
+   while the GitHub repo is still named `daylog`; the rename happens
+   before merge.
+2. **Delete the local `v0.1.0` tag** (`git tag -d v0.1.0`) so
+   semantic-release's first run on origin sees no prior tags. Origin
+   has no tags either, so nothing is force-pushed.
+3. **Rename the GitHub repository** `adrianschmidt/daylog` →
+   `adrianschmidt/vitalog`. The App installation and Ruleset bypass
+   follow automatically (both keyed on the repo's stable internal ID,
+   not the name); old URLs continue to redirect; existing PRs and
+   issues move with the repo.
+4. **Update the local git remote** for explicitness:
+   `git remote set-url origin git@github.com:adrianschmidt/vitalog.git`.
+   (Strictly optional — the redirect keeps the old URL working — but
+   recommended to avoid future confusion.)
+5. **Merge the PR to `main`.** This is the first push that triggers
+   `release.yml` end-to-end. Semantic-release sees no tags, picks
+   `1.0.0`, builds the four binaries, and creates the first
+   `vitalog v1.0.0` GitHub Release.
+6. **Verify** per the verification plan; re-run the workflow or fix
+   forward as needed.
+
+Doing the GitHub-side rename in step 3 (before merge) means the first
+release lives natively on `vitalog` with no `daylog` URLs in release
+notes or asset download links.
 
 ## Verification plan
 
