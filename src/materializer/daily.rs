@@ -801,7 +801,7 @@ mod tests {
     fn materialize_normalizes_12h_sleep_to_24h() {
         let dir = tempfile::TempDir::new().unwrap();
         let notes_dir = dir.path();
-        let db_path = notes_dir.join(".daylog.db");
+        let db_path = notes_dir.join(".vitalog.db");
         let conn = rusqlite::Connection::open(&db_path).unwrap();
         conn.execute_batch(
             "CREATE TABLE days (
@@ -845,7 +845,7 @@ mod tests {
     fn materialize_normalizes_24h_sleep_to_24h() {
         let dir = tempfile::TempDir::new().unwrap();
         let notes_dir = dir.path();
-        let db_path = notes_dir.join(".daylog.db");
+        let db_path = notes_dir.join(".vitalog.db");
         let conn = rusqlite::Connection::open(&db_path).unwrap();
         conn.execute_batch(
             "CREATE TABLE days (

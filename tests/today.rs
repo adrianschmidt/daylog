@@ -1,4 +1,4 @@
-//! End-to-end test for `daylog today`.
+//! End-to-end test for `vitalog today`.
 
 use chrono::NaiveDate;
 use vitalog::cli::today_cmd::{assemble, render_json, render_text};

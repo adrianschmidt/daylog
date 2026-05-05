@@ -55,7 +55,7 @@ fn format_sleep_line(
 }
 
 /// Format the in-progress sleep-line ("Sleep: in progress (since 10:30pm)")
-/// shown when a `daylog sleep-start` has been recorded but `sleep-end` has
+/// shown when a `vitalog sleep-start` has been recorded but `sleep-end` has
 /// not. Returns `None` if there is no pending bedtime.
 fn format_pending_sleep_line(
     pending: Option<&crate::state::PendingSleepStart>,
@@ -250,7 +250,7 @@ impl Module for Dashboard {
                     Style::default().fg(Color::DarkGray),
                 )));
                 lines.push(Line::from(Span::styled(
-                    "Create a note or run `daylog edit`",
+                    "Create a note or run `vitalog edit`",
                     Style::default().fg(Color::DarkGray),
                 )));
                 lines

@@ -128,7 +128,7 @@ impl Config {
         let path = Self::config_path()?;
         if !path.exists() {
             color_eyre::eyre::bail!(
-                "Config not found at {}. Run `daylog init` to create one.",
+                "Config not found at {}. Run `vitalog init` to create one.",
                 path.display()
             );
         }
@@ -162,7 +162,7 @@ impl Config {
         let notes = self.notes_dir_path();
         if !notes.exists() {
             color_eyre::eyre::bail!(
-                "Notes directory does not exist: {}. Check notes_dir in your config or run `daylog init`.",
+                "Notes directory does not exist: {}. Check notes_dir in your config or run `vitalog init`.",
                 notes.display()
             );
         }
@@ -199,7 +199,7 @@ impl Config {
     pub fn config_dir() -> Result<PathBuf> {
         let dir = dirs::config_dir()
             .ok_or_else(|| color_eyre::eyre::eyre!("Could not determine config directory"))?
-            .join("daylog");
+            .join("vitalog");
         Ok(dir)
     }
 
@@ -214,7 +214,7 @@ impl Config {
     pub fn db_path(&self) -> PathBuf {
         match &self.db_path {
             Some(p) => expand_tilde(p),
-            None => self.notes_dir_path().join(".daylog.db"),
+            None => self.notes_dir_path().join(".vitalog.db"),
         }
     }
 

@@ -1,4 +1,4 @@
-//! `daylog food` — append a food entry to the day's `## Food` section.
+//! `vitalog food` — append a food entry to the day's `## Food` section.
 //! Implementation is split across tasks: amount parsing, nutrient scaling,
 //! and output formatting here; DB lookup and CLI wiring in Task 10.
 
@@ -172,7 +172,7 @@ fn render_with_amount(food: &FoodLookup, amount: Amount) -> Result<RenderedEntry
             (None, Some(_), _) => {
                 bail!(
                     "{} is a liquid (per_100ml only) and has no density_g_per_ml. \
-                     Use ml: 'daylog food {} {}ml'.",
+                     Use ml: 'vitalog food {} {}ml'.",
                     food.name,
                     food.name,
                     amount.value
@@ -193,7 +193,7 @@ fn render_with_amount(food: &FoodLookup, amount: Amount) -> Result<RenderedEntry
             (None, Some(_), _) => {
                 bail!(
                     "{} is a solid (per_100g only) and has no density_g_per_ml. \
-                     Use grams: 'daylog food {} {}g'.",
+                     Use grams: 'vitalog food {} {}g'.",
                     food.name,
                     food.name,
                     amount.value
@@ -462,7 +462,7 @@ fn lookup_food(config: &Config, name: &str) -> Result<FoodLookup> {
     let db_path = config.db_path();
     if !db_path.exists() {
         return Err(color_eyre::eyre::eyre!(
-            "Database not found at {}. Run 'daylog init' or 'daylog sync' first, \
+            "Database not found at {}. Run 'vitalog init' or 'vitalog sync' first, \
              or pass --kcal/--protein/--carbs/--fat for a one-off entry.",
             db_path.display()
         ));

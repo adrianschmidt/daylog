@@ -211,7 +211,7 @@ pub fn atomic_write(path: &Path, content: &str) -> Result<()> {
     let dir = path
         .parent()
         .ok_or_else(|| color_eyre::eyre::eyre!("Invalid file path: {}", path.display()))?;
-    let temp_path = dir.join(format!(".daylog-tmp-{}", std::process::id()));
+    let temp_path = dir.join(format!(".vitalog-tmp-{}", std::process::id()));
     std::fs::write(&temp_path, content)
         .wrap_err_with(|| format!("Failed to write temp file: {}", temp_path.display()))?;
     std::fs::rename(&temp_path, path)

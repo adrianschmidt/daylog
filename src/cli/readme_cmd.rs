@@ -1,7 +1,7 @@
-//! `daylog readme` — print the embedded README.md to stdout.
+//! `vitalog readme` — print the embedded README.md to stdout.
 //!
 //! The README is `include_str!`-embedded at compile time so the
-//! installed binary (`~/.cargo/bin/daylog`) ships with its own docs —
+//! installed binary (`~/.cargo/bin/vitalog`) ships with its own docs —
 //! no separate clone or network access required for an AI agent or
 //! user to discover how to use the tool.
 

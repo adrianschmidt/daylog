@@ -72,8 +72,8 @@ pub fn cmd_sleep_end(time_arg: Option<&str>, config: &Config) -> Result<()> {
         Some(p) => p,
         None => {
             return Err(color_eyre::eyre::eyre!("No pending sleep-start.")).suggestion(
-                "Run `daylog sleep-start` before bed, or use \
-                 `daylog log sleep \"HH:MM-HH:MM\"` for a one-shot entry.",
+                "Run `vitalog sleep-start` before bed, or use \
+                 `vitalog log sleep \"HH:MM-HH:MM\"` for a one-shot entry.",
             );
         }
     };
@@ -87,8 +87,8 @@ pub fn cmd_sleep_end(time_arg: Option<&str>, config: &Config) -> Result<()> {
             "No pending sleep-start (discarded stale bedtime {stale_bedtime} from {stale_recorded_at})."
         ))
         .suggestion(format!(
-            "If you slept that night, recover it with `daylog log sleep \"{stale_bedtime}-HH:MM\"`. \
-             Otherwise run `daylog sleep-start` before bed."
+            "If you slept that night, recover it with `vitalog log sleep \"{stale_bedtime}-HH:MM\"`. \
+             Otherwise run `vitalog sleep-start` before bed."
         ));
     }
 

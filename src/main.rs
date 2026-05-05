@@ -85,18 +85,18 @@ fn cmd_init(notes_dir_arg: Option<String>, no_demo: bool) -> Result<()> {
     let notes_dir = if let Some(dir) = notes_dir_arg {
         dir
     } else if std::io::stdin().is_terminal() {
-        print!("Notes directory [~/daylog-notes/]: ");
+        print!("Notes directory [~/vitalog-notes/]: ");
         std::io::stdout().flush()?;
         let mut input = String::new();
         std::io::stdin().read_line(&mut input)?;
         let input = input.trim();
         if input.is_empty() {
-            "~/daylog-notes".to_string()
+            "~/vitalog-notes".to_string()
         } else {
             input.to_string()
         }
     } else {
-        "~/daylog-notes".to_string()
+        "~/vitalog-notes".to_string()
     };
 
     // Create directories
@@ -159,7 +159,7 @@ fn cmd_init(notes_dir_arg: Option<String>, no_demo: bool) -> Result<()> {
         eprintln!("{errors} notes had parse errors");
     }
 
-    eprintln!("Run `daylog` to start!");
+    eprintln!("Run `vitalog` to start!");
     Ok(())
 }
 
@@ -176,7 +176,7 @@ fn cmd_status() -> Result<()> {
 
     if !db_path.exists() {
         color_eyre::eyre::bail!(
-            "Database not found at {}. Run `daylog init` or `daylog sync` first.",
+            "Database not found at {}. Run `vitalog init` or `vitalog sync` first.",
             db_path.display()
         );
     }
@@ -201,7 +201,7 @@ fn cmd_status() -> Result<()> {
     }
 
     // Surface pending sleep state so scripts and `--json` consumers can see
-    // a sleep-in-progress (between `daylog sleep-start` and `daylog sleep-end`).
+    // a sleep-in-progress (between `vitalog sleep-start` and `vitalog sleep-end`).
     let pending = vitalog::state::load(&config.notes_dir_path());
     if let Some(p) = pending.sleep_start {
         output["pending"] = serde_json::json!({
