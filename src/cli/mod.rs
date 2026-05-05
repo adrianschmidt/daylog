@@ -28,7 +28,7 @@ pub struct Cli {
 
 #[derive(Subcommand)]
 pub enum Commands {
-    /// Set up daylog: create config, generate demo data
+    /// Set up vitalog: create config, generate demo data
     Init {
         /// Notes directory path (skip interactive prompt)
         #[arg(long)]
@@ -65,8 +65,8 @@ pub enum Commands {
     Readme,
     /// Record bedtime (uses now, or pass a time)
     ///
-    /// Stores the pending bedtime in `.daylog-state.toml` next to the DB.
-    /// Run `daylog sleep-end` after waking to finalize the entry.
+    /// Stores the pending bedtime in `.vitalog-state.toml` next to the DB.
+    /// Run `vitalog sleep-end` after waking to finalize the entry.
     ///
     /// Re-running before `sleep-end` replaces the previous pending bedtime
     /// (with a stderr notice). A pending bedtime older than 24h is treated
@@ -77,7 +77,7 @@ pub enum Commands {
     },
     /// Finalize sleep entry on today's note (uses now, or pass a wake time)
     ///
-    /// Reads the pending bedtime from `daylog sleep-start` and writes
+    /// Reads the pending bedtime from `vitalog sleep-start` and writes
     /// `sleep: "bedtime-waketime"` to today's note. The wake date is
     /// always calendar today (the date on the wall clock), independent of
     /// `day_start_hour` — bedtimes past midnight land on the wake-day's

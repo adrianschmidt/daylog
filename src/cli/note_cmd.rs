@@ -1,4 +1,4 @@
-//! `daylog note` — append a free-text note to the day's `## Notes` section.
+//! `vitalog note` — append a free-text note to the day's `## Notes` section.
 
 use color_eyre::eyre::{bail, Result};
 

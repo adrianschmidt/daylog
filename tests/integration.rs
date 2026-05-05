@@ -233,7 +233,7 @@ fn sync_all_includes_nutrition_db() {
     )
     .unwrap();
 
-    let db_path = notes_dir.join(".daylog.db");
+    let db_path = notes_dir.join(".vitalog.db");
     let config: vitalog::config::Config = toml::from_str(&format!(
         "notes_dir = '{}'\n",
         notes_dir.display().to_string().replace('\\', "/")
@@ -265,7 +265,7 @@ fn rebuild_reparses_nutrition_unconditionally() {
     )
     .unwrap();
 
-    let db_path = notes_dir.join(".daylog.db");
+    let db_path = notes_dir.join(".vitalog.db");
     let config: vitalog::config::Config = toml::from_str(&format!(
         "notes_dir = '{}'\n",
         notes_dir.display().to_string().replace('\\', "/")
@@ -315,7 +315,7 @@ fn sync_all_silent_when_nutrition_db_missing() {
     .unwrap();
     // No nutrition-db.md.
 
-    let db_path = notes_dir.join(".daylog.db");
+    let db_path = notes_dir.join(".vitalog.db");
     let config: vitalog::config::Config = toml::from_str(&format!(
         "notes_dir = '{}'\n",
         notes_dir.display().to_string().replace('\\', "/")
@@ -346,7 +346,7 @@ fn status_json_includes_nutrition_db() {
     )
     .unwrap();
 
-    let db_path = notes_dir.join(".daylog.db");
+    let db_path = notes_dir.join(".vitalog.db");
     let config: vitalog::config::Config = toml::from_str(&format!(
         "notes_dir = '{}'\n",
         notes_dir.display().to_string().replace('\\', "/")

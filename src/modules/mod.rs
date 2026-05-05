@@ -47,7 +47,7 @@ impl SqlValue {
 }
 
 /// Describes where a field lives in the YAML frontmatter.
-/// Used by `daylog log` to route writes to the correct location.
+/// Used by `vitalog log` to route writes to the correct location.
 pub enum YamlPath {
     /// Top-level scalar: `weight: 173.4`
     Scalar(String),
@@ -92,12 +92,12 @@ pub trait Module: Send + Sync {
         false
     }
 
-    /// Optional: contribute fields to `daylog status --json`
+    /// Optional: contribute fields to `vitalog status --json`
     fn status_json(&self, _conn: &Connection, _config: &Config) -> Option<serde_json::Value> {
         None
     }
 
-    /// Optional: map a `daylog log` field to a YAML path.
+    /// Optional: map a `vitalog log` field to a YAML path.
     /// e.g., training module maps ("lift", "pullup") → YamlPath::Nested("lifts", "pullup")
     fn log_field_path(&self, _field: &str, _subfield: &str) -> Option<YamlPath> {
         None

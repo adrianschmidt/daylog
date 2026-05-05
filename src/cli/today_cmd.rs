@@ -1,4 +1,4 @@
-//! `daylog today [date]` — print a compact daily summary.
+//! `vitalog today [date]` — print a compact daily summary.
 
 use std::io::IsTerminal;
 
@@ -63,7 +63,7 @@ pub fn execute(date: Option<&str>, json: bool, config: &Config) -> Result<()> {
     let db_path = config.db_path();
     if !db_path.exists() {
         color_eyre::eyre::bail!(
-            "Database not found at {}. Run `daylog init` or `daylog sync` first.",
+            "Database not found at {}. Run `vitalog init` or `vitalog sync` first.",
             db_path.display()
         );
     }

@@ -1,4 +1,4 @@
-//! `daylog bp` — write blood pressure to YAML + append a `## Vitals` line.
+//! `vitalog bp` — write blood pressure to YAML + append a `## Vitals` line.
 
 use chrono::NaiveTime;
 use color_eyre::eyre::{bail, Result};

@@ -1,8 +1,8 @@
-//! Pending CLI state stored in `{notes_dir}/.daylog-state.toml`.
+//! Pending CLI state stored in `{notes_dir}/.vitalog-state.toml`.
 //!
 //! This sidecar holds short-lived state that doesn't belong in the daily
 //! notes themselves — currently only the pending bedtime between
-//! `daylog sleep-start` and `daylog sleep-end`.
+//! `vitalog sleep-start` and `vitalog sleep-end`.
 //!
 //! ## Concurrency / crash semantics
 //!
@@ -10,7 +10,7 @@
 //!   into place, so a crash mid-write cannot leave the sidecar partially
 //!   written. The temp filename includes [`std::process::id`] so concurrent
 //!   processes don't collide on the temp path.
-//! - **No advisory locking.** Two `daylog` processes performing
+//! - **No advisory locking.** Two `vitalog` processes performing
 //!   read-modify-write on the sidecar can race: P1 reads, P2 reads, P1
 //!   saves, P2 saves — P2 wins. For two `sleep-start` invocations this is
 //!   the intended "last bedtime wins" semantic. For mixed `sleep-start` /
@@ -25,16 +25,16 @@
 //!   warning rather than failing, since blocking sleep logging on a
 //!   corrupted sidecar would be worse UX than losing the in-flight bedtime.
 //! - **Co-located with the DB by design:** the sidecar lives next to
-//!   `.daylog.db` in `notes_dir`. This means sleep state is per-notes-dir,
+//!   `.vitalog.db` in `notes_dir`. This means sleep state is per-notes-dir,
 //!   matching the data model. Users syncing `notes_dir` across machines
-//!   should add `.daylog-state.toml` to their ignore list.
+//!   should add `.vitalog-state.toml` to their ignore list.
 
 use chrono::{DateTime, Local, NaiveTime};
 use color_eyre::eyre::{Result, WrapErr};
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
-const STATE_FILENAME: &str = ".daylog-state.toml";
+const STATE_FILENAME: &str = ".vitalog-state.toml";
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
 pub struct PendingState {
@@ -52,7 +52,7 @@ pub fn state_path(notes_dir: &Path) -> PathBuf {
     notes_dir.join(STATE_FILENAME)
 }
 
-/// Load pending state from `{notes_dir}/.daylog-state.toml`.
+/// Load pending state from `{notes_dir}/.vitalog-state.toml`.
 /// Returns empty state if the file is missing OR cannot be parsed
 /// (warns on stderr in the latter case). Sleep state is recoverable —
 /// failing here would block the user from logging.
@@ -86,7 +86,7 @@ pub fn save(notes_dir: &Path, state: &PendingState) -> Result<()> {
     let dir = path
         .parent()
         .ok_or_else(|| color_eyre::eyre::eyre!("Invalid state path: {}", path.display()))?;
-    let temp = dir.join(format!(".daylog-state.tmp-{}", std::process::id()));
+    let temp = dir.join(format!(".vitalog-state.tmp-{}", std::process::id()));
     std::fs::write(&temp, contents)
         .wrap_err_with(|| format!("Failed to write {}", temp.display()))?;
     std::fs::rename(&temp, &path)

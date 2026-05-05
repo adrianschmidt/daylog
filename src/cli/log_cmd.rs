@@ -5,7 +5,7 @@ use crate::config::Config;
 use crate::frontmatter;
 use crate::modules::{Module, YamlPath};
 
-/// Execute the `daylog log <field> <value...>` command.
+/// Execute the `vitalog log <field> <value...>` command.
 ///
 /// Writes a value to today's daily note frontmatter.
 pub fn execute(
@@ -50,8 +50,8 @@ pub fn execute(
 /// Apply a parsed sleep range to the daily note for `date_str` (a `YYYY-MM-DD`
 /// string). Reads the existing note or renders the template, sets the
 /// `sleep:` scalar via `format_sleep_range` + `set_scalar`, and atomic-writes
-/// the result. This is the shared write-path used by both `daylog log sleep`
-/// (today's note via `effective_today`) and `daylog sleep-end` (calendar
+/// the result. This is the shared write-path used by both `vitalog log sleep`
+/// (today's note via `effective_today`) and `vitalog sleep-end` (calendar
 /// today, regardless of `day_start_hour`).
 pub(crate) fn write_sleep_for_date(
     date_str: &str,
@@ -144,7 +144,7 @@ fn route_field(
     // Special case: metric field
     if field == "metric" {
         if value.len() < 2 {
-            bail!("Usage: daylog log metric <name> <value>");
+            bail!("Usage: vitalog log metric <name> <value>");
         }
         let subfield = &value[0];
         let remaining = value[1..].join(" ");
@@ -165,7 +165,7 @@ fn route_field(
                 YamlPath::Nested(parent, child) => {
                     let remaining = value[1..].join(" ");
                     if remaining.is_empty() {
-                        bail!("Usage: daylog log {field} <subfield> <value>");
+                        bail!("Usage: vitalog log {field} <subfield> <value>");
                     }
                     Ok(frontmatter::set_nested(
                         content, &parent, &child, &remaining,
