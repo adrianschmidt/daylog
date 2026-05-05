@@ -4,7 +4,39 @@ use color_eyre::Section;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::fmt;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::OnceLock;
+
+static LEGACY_HINT_PRINTED: OnceLock<()> = OnceLock::new();
+
+// Manual smoke: invoke a command twice in one process and confirm the
+// hint message appears at most once on stderr.
+fn print_legacy_hint_once(legacy: &Path, current: &Path) {
+    if LEGACY_HINT_PRINTED.set(()).is_ok() {
+        eprintln!(
+            "Note: Found legacy daylog data at {}.\n\
+             Run `vitalog migrate` to move it to {}.",
+            legacy.display(),
+            current.display(),
+        );
+    }
+}
+
+/// Path-injectable variant of `Config::config_path()`. Prefers
+/// `<parent>/vitalog/config.toml`; falls back to
+/// `<parent>/daylog/config.toml` when the new path does not exist but
+/// the legacy one does. Pure — no I/O side effects, no logging.
+pub(crate) fn resolve_config_path(parent: &Path) -> PathBuf {
+    let current = parent.join("vitalog").join("config.toml");
+    if current.exists() {
+        return current;
+    }
+    let legacy = parent.join("daylog").join("config.toml");
+    if legacy.exists() {
+        return legacy;
+    }
+    current // best default for "doesn't exist anywhere yet" — vitalog wins
+}
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -204,7 +236,14 @@ impl Config {
     }
 
     pub fn config_path() -> Result<PathBuf> {
-        Ok(Self::config_dir()?.join("config.toml"))
+        let parent = dirs::config_dir()
+            .ok_or_else(|| color_eyre::eyre::eyre!("Could not determine config directory"))?;
+        let resolved = resolve_config_path(&parent);
+        let legacy_dir = parent.join("daylog");
+        if resolved.starts_with(&legacy_dir) {
+            print_legacy_hint_once(&legacy_dir, &parent.join("vitalog"));
+        }
+        Ok(resolved)
     }
 
     pub fn notes_dir_path(&self) -> PathBuf {
@@ -212,10 +251,20 @@ impl Config {
     }
 
     pub fn db_path(&self) -> PathBuf {
-        match &self.db_path {
-            Some(p) => expand_tilde(p),
-            None => self.notes_dir_path().join(".vitalog.db"),
+        if let Some(p) = &self.db_path {
+            return expand_tilde(p);
         }
+        let notes = self.notes_dir_path();
+        let current = notes.join(".vitalog.db");
+        if current.is_file() {
+            return current;
+        }
+        let legacy = notes.join(".daylog.db");
+        if legacy.is_file() {
+            print_legacy_hint_once(&legacy, &current);
+            return legacy;
+        }
+        current
     }
 
     pub fn module_config(&self, id: &str) -> Option<&toml::Value> {
@@ -501,5 +550,46 @@ med-evening = "Evening meds"
     fn notes_aliases_default_empty() {
         let config: Config = toml::from_str("notes_dir = '/tmp/test'\n").unwrap();
         assert!(config.notes.aliases.is_empty());
+    }
+}
+
+#[cfg(test)]
+mod legacy_fallback_tests {
+    use super::*;
+    use tempfile::TempDir;
+
+    #[test]
+    fn config_path_falls_back_to_legacy_when_only_old_exists() {
+        let tmp = TempDir::new().unwrap();
+        let parent = tmp.path();
+        std::fs::create_dir(parent.join("daylog")).unwrap();
+        std::fs::write(parent.join("daylog/config.toml"), "notes_dir = \"~/x\"\n").unwrap();
+
+        let resolved = resolve_config_path(parent);
+
+        assert_eq!(resolved, parent.join("daylog/config.toml"));
+    }
+
+    #[test]
+    fn config_path_uses_current_when_both_exist() {
+        let tmp = TempDir::new().unwrap();
+        let parent = tmp.path();
+        std::fs::create_dir(parent.join("daylog")).unwrap();
+        std::fs::create_dir(parent.join("vitalog")).unwrap();
+        std::fs::write(parent.join("vitalog/config.toml"), "").unwrap();
+
+        let resolved = resolve_config_path(parent);
+
+        assert_eq!(resolved, parent.join("vitalog/config.toml"));
+    }
+
+    #[test]
+    fn config_path_defaults_to_vitalog_when_neither_exists() {
+        let tmp = TempDir::new().unwrap();
+        let parent = tmp.path();
+
+        let resolved = resolve_config_path(parent);
+
+        assert_eq!(resolved, parent.join("vitalog/config.toml"));
     }
 }
