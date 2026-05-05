@@ -1,10 +1,10 @@
-# daylog AI Agent Interface
+# vitalog AI Agent Interface
 
-daylog is designed for AI agents to read, write, and extend. This document is the authoritative reference for AI integration.
+vitalog is designed for AI agents to read, write, and extend. This document is the authoritative reference for AI integration.
 
 ## 1. Reading Data
 
-### Quick check: `daylog status --json`
+### Quick check: `vitalog status --json`
 
 Returns today's vitals, trends, and module data as JSON:
 
@@ -28,10 +28,10 @@ Returns today's vitals, trends, and module data as JSON:
 
 ### Direct SQLite queries
 
-The database is at `{notes_dir}/.daylog.db`. Open read-only:
+The database is at `{notes_dir}/.vitalog.db`. Open read-only:
 
 ```bash
-sqlite3 -readonly ~/daylog-notes/.daylog.db
+sqlite3 -readonly ~/vitalog-notes/.vitalog.db
 ```
 
 #### Core tables
@@ -89,52 +89,52 @@ SELECT climb_type, grade_raw, count, board FROM climbs WHERE date = date('now');
 
 ## 2. Writing Data
 
-### `daylog log` command
+### `vitalog log` command
 
 Write values to today's daily note. All args after the field name are joined as the value — no shell quoting needed.
 
 ```bash
 # Core fields
-daylog log weight 173.4
-daylog log sleep 10:30pm-6:15am
-daylog log mood 4
-daylog log energy 3
+vitalog log weight 173.4
+vitalog log sleep 10:30pm-6:15am
+vitalog log mood 4
+vitalog log energy 3
 
 # Training fields (routed through training module)
-daylog log lift pullup BWx8, BWx6
-daylog log lift squat 185x5, 205x3, 225x1
-daylog log session strength
-daylog log duration 45
-daylog log rpe 7
+vitalog log lift pullup BWx8, BWx6
+vitalog log lift squat 185x5, 205x3, 225x1
+vitalog log session strength
+vitalog log duration 45
+vitalog log rpe 7
 
 # Climbing fields (routed through climbing module, if enabled)
-daylog log climb send V5
-daylog log climb attempt V7
+vitalog log climb send V5
+vitalog log climb attempt V7
 
 # Custom metrics (any [metrics] key from config)
-daylog log metric resting_hr 52
-daylog log metric meditation_min 15
+vitalog log metric resting_hr 52
+vitalog log metric meditation_min 15
 ```
 
-**IMPORTANT:** `daylog log` calls must be serialized, not parallel.
-- Safe: `daylog log weight 173 && daylog log mood 4`
-- NOT safe: `daylog log weight 173 & daylog log mood 4`
+**IMPORTANT:** `vitalog log` calls must be serialized, not parallel.
+- Safe: `vitalog log weight 173 && vitalog log mood 4`
+- NOT safe: `vitalog log weight 173 & vitalog log mood 4`
 
-### `daylog edit`
+### `vitalog edit`
 
 Opens today's note in `$EDITOR`. Creates from template if missing.
 
 ```bash
-daylog edit                    # today
-daylog edit 2026-03-25         # specific date
+vitalog edit                    # today
+vitalog edit 2026-03-25         # specific date
 ```
 
-### `daylog sync`
+### `vitalog sync`
 
 Forces an incremental DB update without launching the TUI.
 
 ```bash
-daylog sync
+vitalog sync
 ```
 
 ### Notes format
@@ -170,13 +170,13 @@ Good session. Hit a squat PR.
 
 ### Tier 1: Add a custom metric (config only)
 
-Add to `~/.config/daylog/config.toml`:
+Add to `~/.config/vitalog/config.toml`:
 ```toml
 [metrics]
 resting_hr = { display = "Resting HR", color = "red", unit = "bpm" }
 ```
 
-Add the field to your daily notes. Trends tab auto-renders a sparkline. Run `daylog rebuild` to backfill historical data.
+Add the field to your daily notes. Trends tab auto-renders a sparkline. Run `vitalog rebuild` to backfill historical data.
 
 ### Tier 2: Add an exercise (config only)
 
