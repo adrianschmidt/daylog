@@ -1,10 +1,10 @@
-# Contributing to daylog
+# Contributing to vitalog
 
 ## Quick Start
 
 ```bash
-git clone https://github.com/your-username/daylog
-cd daylog
+git clone https://github.com/your-username/vitalog
+cd vitalog
 cargo build
 cargo test
 ```
@@ -31,7 +31,7 @@ Open an issue with:
 - What you ran
 - What you expected
 - What happened instead
-- Your OS and `daylog --version`
+- Your OS and `vitalog --version`
 
 ## Code Conventions
 
@@ -39,3 +39,27 @@ Open an issue with:
 - `cargo fmt` and `cargo clippy` clean
 - Every user-facing error gets a `.suggestion()` with a concrete next step
 - Modules are self-contained — never import from another module
+
+## Commit conventions
+
+vitalog uses [Conventional Commits](https://www.conventionalcommits.org/)
+to drive automated releases. The accepted types are:
+
+| Type       | Effect on next release |
+|------------|------------------------|
+| `feat`     | minor bump             |
+| `fix`      | patch bump             |
+| `perf`     | patch bump             |
+| `BREAKING CHANGE:` footer (or `feat!:` / `fix!:`) | major bump |
+| `docs`, `style`, `refactor`, `test`, `build`, `ci`, `chore` | no bump |
+
+A commit subject line looks like:
+
+```
+feat(today): show streak counter on the dashboard
+
+Some optional body explaining motivation and trade-offs.
+```
+
+Scope (the `(today)` part) is optional but encouraged. Use the module
+or feature area, not a file path.
