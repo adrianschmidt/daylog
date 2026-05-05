@@ -2,6 +2,7 @@ pub mod bp_cmd;
 pub mod completions;
 pub mod food_cmd;
 pub mod log_cmd;
+pub mod migrate_cmd;
 pub mod note_cmd;
 pub mod readme_cmd;
 pub mod sleep_cmd;
@@ -37,6 +38,9 @@ pub enum Commands {
         #[arg(long)]
         no_demo: bool,
     },
+    /// Migrate legacy daylog paths (config dir, database) to vitalog locations.
+    /// Idempotent: safe to run multiple times.
+    Migrate,
     /// Log a value to today's note
     Log {
         /// Field name (weight, sleep, mood, energy, lift, climb, metric)

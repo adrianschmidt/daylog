@@ -14,6 +14,7 @@ fn main() -> Result<()> {
 
     match cli.command {
         Some(Commands::Init { notes_dir, no_demo }) => cmd_init(notes_dir, no_demo),
+        Some(Commands::Migrate) => vitalog::cli::migrate_cmd::execute(),
         Some(Commands::Log { field, value }) => cmd_log(&field, &value),
         Some(Commands::Status) => cmd_status(),
         Some(Commands::Sync) => cmd_sync(),
