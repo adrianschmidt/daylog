@@ -7,6 +7,9 @@
 
 use std::path::{Path, PathBuf};
 
+use color_eyre::eyre::{eyre, WrapErr};
+use color_eyre::Result;
+
 /// Returns `Some(legacy_dir)` if a `daylog/` config directory exists at
 /// `parent` (typically `dirs::config_dir()`), and the corresponding
 /// `vitalog/` directory does NOT exist. Returns `None` otherwise.
@@ -29,6 +32,27 @@ pub fn legacy_db_path(notes_dir: &Path) -> Option<PathBuf> {
         Some(legacy)
     } else {
         None
+    }
+}
+
+/// Moves `from` → `to` atomically (single rename syscall when on the
+/// same filesystem). Returns `Ok(true)` when a move happened, `Ok(false)`
+/// when nothing needed to be done (idempotent). Errors when both `from`
+/// and `to` exist (refuses to overwrite).
+pub fn migrate_config_dir(from: &Path, to: &Path) -> Result<bool> {
+    match (from.exists(), to.exists()) {
+        (false, _) => Ok(false),
+        (true, true) => Err(eyre!(
+            "Both legacy ({}) and current ({}) config directories exist; \
+             refusing to overwrite. Resolve manually.",
+            from.display(),
+            to.display(),
+        )),
+        (true, false) => {
+            std::fs::rename(from, to)
+                .wrap_err_with(|| format!("rename {} → {}", from.display(), to.display()))?;
+            Ok(true)
+        }
     }
 }
 
@@ -79,5 +103,48 @@ mod tests {
         std::fs::write(tmp.path().join(".daylog.db"), b"").unwrap();
         std::fs::write(tmp.path().join(".vitalog.db"), b"").unwrap();
         assert_eq!(legacy_db_path(tmp.path()), None);
+    }
+
+    #[test]
+    fn migrate_config_dir_moves_dir() {
+        let tmp = TempDir::new().unwrap();
+        let from = tmp.path().join("daylog");
+        let to = tmp.path().join("vitalog");
+        std::fs::create_dir(&from).unwrap();
+        std::fs::write(from.join("config.toml"), b"hello").unwrap();
+
+        let moved = migrate_config_dir(&from, &to).unwrap();
+
+        assert!(moved);
+        assert!(!from.exists());
+        assert!(to.is_dir());
+        assert_eq!(std::fs::read(to.join("config.toml")).unwrap(), b"hello");
+    }
+
+    #[test]
+    fn migrate_config_dir_is_idempotent() {
+        let tmp = TempDir::new().unwrap();
+        let from = tmp.path().join("daylog");
+        let to = tmp.path().join("vitalog");
+
+        // No-op when neither side exists.
+        assert!(!migrate_config_dir(&from, &to).unwrap());
+
+        // No-op when only the destination exists.
+        std::fs::create_dir(&to).unwrap();
+        assert!(!migrate_config_dir(&from, &to).unwrap());
+    }
+
+    #[test]
+    fn migrate_config_dir_refuses_overwrite() {
+        let tmp = TempDir::new().unwrap();
+        let from = tmp.path().join("daylog");
+        let to = tmp.path().join("vitalog");
+        std::fs::create_dir(&from).unwrap();
+        std::fs::create_dir(&to).unwrap();
+
+        let err = migrate_config_dir(&from, &to).unwrap_err();
+        assert!(err.to_string().contains("refusing to overwrite"));
+        assert!(from.exists() && to.exists());
     }
 }
