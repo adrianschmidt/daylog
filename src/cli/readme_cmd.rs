@@ -21,9 +21,9 @@ mod tests {
     }
 
     #[test]
-    fn readme_mentions_daylog_food() {
+    fn readme_mentions_vitalog_food() {
         assert!(
-            README.contains("daylog food"),
+            README.contains("vitalog food"),
             "embedded README should describe the food subcommand"
         );
     }

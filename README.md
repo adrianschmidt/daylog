@@ -1,33 +1,33 @@
-# daylog
+# vitalog
 
-[![CI](https://github.com/tfolkman/daylog/actions/workflows/ci.yml/badge.svg)](https://github.com/tfolkman/daylog/actions/workflows/ci.yml)
-[![crates.io](https://img.shields.io/crates/v/daylog.svg)](https://crates.io/crates/daylog)
+[![CI](https://github.com/adrianschmidt/vitalog/actions/workflows/ci.yml/badge.svg)](https://github.com/adrianschmidt/vitalog/actions/workflows/ci.yml)
+[![crates.io](https://img.shields.io/crates/v/vitalog.svg)](https://crates.io/crates/vitalog)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-A terminal dashboard that tracks your life from markdown notes.
+> Originally forked from [tfolkman/daylog](https://github.com/tfolkman/daylog).
 
-![daylog demo](tapes/demo.gif)
+A terminal dashboard that tracks your life from markdown notes.
 
 ## Install
 
 ```bash
-cargo install daylog
+cargo install vitalog
 ```
 
-Or download a pre-built binary from [GitHub Releases](https://github.com/tfolkman/daylog/releases).
+Or download a pre-built binary from [GitHub Releases](https://github.com/adrianschmidt/vitalog/releases).
 
 ## Quick Start
 
 ```bash
-daylog init
-daylog
+vitalog init
+vitalog
 ```
 
 Two commands to a working dashboard. No API keys, no Docker, no config files to write.
 
 ## What It Does
 
-daylog reads your daily markdown notes (one per day, `YYYY-MM-DD.md`) and renders a live terminal dashboard. Edit a note, save it, see the TUI update in real time.
+vitalog reads your daily markdown notes (one per day, `YYYY-MM-DD.md`) and renders a live terminal dashboard. Edit a note, save it, see the TUI update in real time.
 
 ```yaml
 ---
@@ -75,35 +75,35 @@ For domains needing custom tables and visualization. The climbing module is the 
 ## CLI
 
 ```bash
-daylog                          # Launch the TUI
-daylog log weight 173.4         # Log a value (no quotes needed)
-daylog log lift squat 185x5     # Log a lift
-daylog log sleep 10:30pm-6:15am # Log sleep
-daylog log metric resting_hr 52 # Log a custom metric
-daylog sleep-start              # Record bedtime (uses now, or pass a time)
-daylog sleep-end                # Finalize sleep entry on today's note
-daylog status --json            # Today's data as JSON
-daylog today                    # Compact daily summary (food, weight, sleep, BP, metrics)
-daylog today 2026-04-29 --json  # Summary for a past date as JSON
-daylog edit                     # Open today's note in $EDITOR
-daylog sync                     # Sync DB without launching TUI
-daylog rebuild                  # Rebuild DB from all notes
+vitalog                          # Launch the TUI
+vitalog log weight 173.4         # Log a value (no quotes needed)
+vitalog log lift squat 185x5     # Log a lift
+vitalog log sleep 10:30pm-6:15am # Log sleep
+vitalog log metric resting_hr 52 # Log a custom metric
+vitalog sleep-start              # Record bedtime (uses now, or pass a time)
+vitalog sleep-end                # Finalize sleep entry on today's note
+vitalog status --json            # Today's data as JSON
+vitalog today                    # Compact daily summary (food, weight, sleep, BP, metrics)
+vitalog today 2026-04-29 --json  # Summary for a past date as JSON
+vitalog edit                     # Open today's note in $EDITOR
+vitalog sync                     # Sync DB without launching TUI
+vitalog rebuild                  # Rebuild DB from all notes
 ```
 
 ### Sleep across midnight
 
-`daylog sleep-start` and `daylog sleep-end` automate the past-midnight
+`vitalog sleep-start` and `vitalog sleep-end` automate the past-midnight
 date math (sleep is recorded on the file for the day you wake up):
 
 ```bash
-daylog sleep-start              # before bed (or: daylog sleep-start 22:30)
-daylog sleep-end                # after waking (or: daylog sleep-end 06:15)
+vitalog sleep-start              # before bed (or: vitalog sleep-start 22:30)
+vitalog sleep-end                # after waking (or: vitalog sleep-end 06:15)
 # → writes `sleep: "10:30pm-6:15am"` to today's note
 ```
 
-The pending bedtime lives in a `.daylog-state.toml` sidecar next to the
+The pending bedtime lives in a `.vitalog-state.toml` sidecar next to the
 database (in `notes_dir`). If you sync `notes_dir` across machines via
-git/Dropbox/iCloud, add `.daylog-state.toml` to your ignore list — the
+git/Dropbox/iCloud, add `.vitalog-state.toml` to your ignore list — the
 sidecar is per-machine state and is not designed for cross-device sync.
 
 ### Logging food, notes, and BP from the CLI
@@ -114,42 +114,42 @@ auto-inserting the section if it's missing.
 
 ```bash
 # Food — nutrition-db lookup with gram or ml amount
-daylog food "tomato soup" 500g
-daylog food "whole milk" 250ml
+vitalog food "tomato soup" 500g
+vitalog food "whole milk" 250ml
 
 # Food — total-panel foods need no amount
-daylog food tea
-daylog food protein-shake
+vitalog food tea
+vitalog food protein-shake
 
 # Food — one-off custom item, all four macros required together;
 # --gi / --gl / --ii independently optional. GL auto-computes when
 # GI and carbs are both known.
-daylog food --kcal 350 --protein 7 --carbs 24 --fat 25 \
+vitalog food --kcal 350 --protein 7 --carbs 24 --fat 25 \
             --gi 50 "Random pasta dish" 500g
 
 # Note — literal text or a [notes.aliases] key
-daylog note "Adderall 10mg"
-daylog note med-morning
+vitalog note "Adderall 10mg"
+vitalog note med-morning
 
 # BP — sys dia pulse; auto-picks bp_morning_* or bp_evening_*
 # based on the measurement time vs. the 14:00 cutoff. --morning /
 # --evening override.
-daylog bp 141 96 70
-daylog bp --evening 133 73 62
+vitalog bp 141 96 70
+vitalog bp --evening 133 73 62
 
 # Shared flags: --date YYYY-MM-DD and --time HH:MM (or H:MMam/pm)
 # for retroactive entries.
-daylog note --date 2026-04-29 --time 23:30 "Allegra 10mg"
-daylog bp --time 08:00 141 96 70   # logged at 14:30 — still morning
+vitalog note --date 2026-04-29 --time 23:30 "Allegra 10mg"
+vitalog bp --time 08:00 141 96 70   # logged at 14:30 — still morning
 ```
 
-After each successful logging command, daylog echoes the line that was
+After each successful logging command, vitalog echoes the line that was
 written and (for `food`) the day's running macro totals, so you can
 verify the right alias matched and see your remaining budget without
-running `daylog today`:
+running `vitalog today`:
 
 ```
-$ daylog food "protein shake" 462g
+$ vitalog food "protein shake" 462g
 Food logged: 2026-05-02 12:02
   - **12:02** Protein shake (462g) (231 kcal, 47.0g protein, 2.4g carbs, 3.6g fat)
 
@@ -160,7 +160,7 @@ Use `--quiet` (or `-q`) for a single-line confirmation, e.g. when
 bulk-logging from scripts:
 
 ```
-$ daylog -q food tea
+$ vitalog -q food tea
 Food logged: 2026-05-02 14:30 Te, Earl Grey, hot
 ```
 
@@ -177,23 +177,23 @@ the database within ~500 ms.
 
 ### Daily summary
 
-`daylog today [date]` prints a compact summary for the day — food
+`vitalog today [date]` prints a compact summary for the day — food
 totals (kcal/protein/carbs/fat from the `## Food` section), morning
 weight, sleep, morning BP, and any custom metrics — with optional
 goal comparison from `goals.md`. Add `--json` for machine-readable
 output suitable for AI agents and scripts.
 
 ```bash
-daylog today                    # today's summary
-daylog today 2026-04-29         # any past date
-daylog today --json             # JSON for tooling
+vitalog today                    # today's summary
+vitalog today 2026-04-29         # any past date
+vitalog today --json             # JSON for tooling
 ```
 
 ## Goals
 
 Goals live in `goals.md` in your notes directory. The body is
 free-form (notes, derivations, history); the YAML frontmatter at the
-top defines the numeric thresholds that `daylog today` compares
+top defines the numeric thresholds that `vitalog today` compares
 against:
 
 ```yaml
@@ -219,10 +219,10 @@ keys are silently ignored, so the file can also hold commentary keys
 
 ## Config
 
-`~/.config/daylog/config.toml`:
+`~/.config/vitalog/config.toml`:
 
 ```toml
-notes_dir = "~/daylog-notes"
+notes_dir = "~/vitalog-notes"
 # refresh_secs = 15
 # time_format = "12h"  # or "24h" — controls how times are written to
                       # markdown and rendered in the TUI. The database
@@ -250,21 +250,21 @@ Exercises, metrics, and colors hot-reload without restart. Module enable/disable
 
 ### Upgrading
 
-After upgrading daylog, run `daylog rebuild` to re-materialize all notes
+After upgrading vitalog, run `vitalog rebuild` to re-materialize all notes
 into canonical form in the database. New releases occasionally tighten
-parsing or change canonical storage; rebuilding ensures `daylog status
+parsing or change canonical storage; rebuilding ensures `vitalog status
 --json` and the TUI see consistent values across historical days.
 
 ## AI-Native
 
-daylog is designed for AI agents:
+vitalog is designed for AI agents:
 
-- `daylog log` lets your AI assistant track your workout
-- `daylog status --json` provides structured data for AI analysis
+- `vitalog log` lets your AI assistant track your workout
+- `vitalog status --json` provides structured data for AI analysis
 - SQLite DB is directly queryable for complex questions
 - Ships with a Claude Code skill for seamless integration
 - `AGENTS.md` documents the full AI interface
-- `daylog readme` prints the README embedded in the binary, so an agent that only has the installed binary can still discover the full convention without network access or a separate clone
+- `vitalog readme` prints the README embedded in the binary, so an agent that only has the installed binary can still discover the full convention without network access or a separate clone
 
 ## Nutrition database
 
@@ -327,7 +327,7 @@ When a food has materially different nutritional values raw vs. cooked (chicken,
 
 ### Watcher and rebuild
 
-The file is parsed live by the watcher on every save, and re-parsed from scratch by `daylog rebuild`. Per-entry parse failures warn to stderr; other entries still get loaded. Deleting the file is a no-op — the `foods` table retains its last successful state. `daylog status --json` reports `nutrition_db.foods_count` and `nutrition_db.last_synced`.
+The file is parsed live by the watcher on every save, and re-parsed from scratch by `vitalog rebuild`. Per-entry parse failures warn to stderr; other entries still get loaded. Deleting the file is a no-op — the `foods` table retains its last successful state. `vitalog status --json` reports `nutrition_db.foods_count` and `nutrition_db.last_synced`.
 
 ## Architecture
 
