@@ -56,6 +56,55 @@ pub fn migrate_config_dir(from: &Path, to: &Path) -> Result<bool> {
     }
 }
 
+/// Moves a `.daylog.db` file to `.vitalog.db`. Also moves the
+/// SQLite WAL/SHM sidecar files (`.db-wal`, `.db-shm`) when present,
+/// matching the main file's behavior. Returns `Ok(true)` if the main
+/// file moved, `Ok(false)` if no-op. Errors when both `from` and `to`
+/// exist (refuses to overwrite).
+///
+/// Partial-failure semantics: if the main file rename succeeds and a
+/// subsequent sidecar rename fails, the function returns `Err` with the
+/// main file already at the new location and stale `-wal`/`-shm` left
+/// at the old path. SQLite regenerates WAL/SHM on next clean open, so
+/// stranded sidecars are a cleanup task (delete the old `*.db-wal` /
+/// `*.db-shm`), not data loss.
+pub fn migrate_db(from: &Path, to: &Path) -> Result<bool> {
+    match (from.is_file(), to.exists()) {
+        (false, _) => Ok(false),
+        (true, true) => Err(eyre!(
+            "Both legacy ({}) and current ({}) database files exist; \
+             refusing to overwrite. Resolve manually.",
+            from.display(),
+            to.display(),
+        )),
+        (true, false) => {
+            std::fs::rename(from, to)
+                .wrap_err_with(|| format!("rename {} → {}", from.display(), to.display()))?;
+            // Sidecar refuse-overwrite is a silent skip rather than an
+            // error: the main-file (true, true) branch above already
+            // refuses up front, so reaching here with a colliding
+            // sidecar means the user resolved the main file manually
+            // and the stale sidecar is recoverable (SQLite regenerates).
+            for suffix in ["-wal", "-shm"] {
+                let s_from = with_suffix(from, suffix);
+                let s_to = with_suffix(to, suffix);
+                if s_from.is_file() && !s_to.exists() {
+                    std::fs::rename(&s_from, &s_to).wrap_err_with(|| {
+                        format!("rename {} → {}", s_from.display(), s_to.display())
+                    })?;
+                }
+            }
+            Ok(true)
+        }
+    }
+}
+
+fn with_suffix(path: &Path, suffix: &str) -> PathBuf {
+    let mut s = path.as_os_str().to_os_string();
+    s.push(suffix);
+    PathBuf::from(s)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -146,5 +195,77 @@ mod tests {
         let err = migrate_config_dir(&from, &to).unwrap_err();
         assert!(err.to_string().contains("refusing to overwrite"));
         assert!(from.exists() && to.exists());
+    }
+
+    #[test]
+    fn migrate_db_renames_main_file() {
+        let tmp = TempDir::new().unwrap();
+        let from = tmp.path().join(".daylog.db");
+        let to = tmp.path().join(".vitalog.db");
+        std::fs::write(&from, b"sqlite content").unwrap();
+
+        let moved = migrate_db(&from, &to).unwrap();
+
+        assert!(moved);
+        assert!(!from.exists());
+        assert_eq!(std::fs::read(&to).unwrap(), b"sqlite content");
+    }
+
+    #[test]
+    fn migrate_db_renames_sidecars_when_present() {
+        let tmp = TempDir::new().unwrap();
+        let from = tmp.path().join(".daylog.db");
+        let to = tmp.path().join(".vitalog.db");
+        std::fs::write(&from, b"main").unwrap();
+        std::fs::write(tmp.path().join(".daylog.db-wal"), b"wal").unwrap();
+        std::fs::write(tmp.path().join(".daylog.db-shm"), b"shm").unwrap();
+
+        assert!(migrate_db(&from, &to).unwrap());
+
+        assert!(!tmp.path().join(".daylog.db-wal").exists());
+        assert!(!tmp.path().join(".daylog.db-shm").exists());
+        assert_eq!(
+            std::fs::read(tmp.path().join(".vitalog.db-wal")).unwrap(),
+            b"wal"
+        );
+        assert_eq!(
+            std::fs::read(tmp.path().join(".vitalog.db-shm")).unwrap(),
+            b"shm"
+        );
+    }
+
+    #[test]
+    fn migrate_db_skips_missing_sidecars() {
+        let tmp = TempDir::new().unwrap();
+        let from = tmp.path().join(".daylog.db");
+        let to = tmp.path().join(".vitalog.db");
+        std::fs::write(&from, b"main").unwrap();
+        // No sidecars created.
+
+        assert!(migrate_db(&from, &to).unwrap());
+        assert!(to.is_file());
+    }
+
+    #[test]
+    fn migrate_db_refuses_overwrite() {
+        let tmp = TempDir::new().unwrap();
+        let from = tmp.path().join(".daylog.db");
+        let to = tmp.path().join(".vitalog.db");
+        std::fs::write(&from, b"main").unwrap();
+        std::fs::write(&to, b"existing").unwrap();
+
+        let err = migrate_db(&from, &to).unwrap_err();
+        assert!(err.to_string().contains("refusing to overwrite"));
+    }
+
+    #[test]
+    fn migrate_db_is_idempotent() {
+        let tmp = TempDir::new().unwrap();
+        let from = tmp.path().join(".daylog.db");
+        let to = tmp.path().join(".vitalog.db");
+
+        assert!(!migrate_db(&from, &to).unwrap());
+        std::fs::write(&to, b"x").unwrap();
+        assert!(!migrate_db(&from, &to).unwrap());
     }
 }
