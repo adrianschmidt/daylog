@@ -5,5 +5,5 @@ use super::Cli;
 
 pub fn generate(shell: Shell) {
     let mut cmd = Cli::command();
-    clap_complete::generate(shell, &mut cmd, "daylog", &mut std::io::stdout());
+    clap_complete::generate(shell, &mut cmd, "vitalog", &mut std::io::stdout());
 }

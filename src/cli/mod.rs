@@ -12,7 +12,7 @@ use clap_complete::Shell;
 
 #[derive(Parser)]
 #[command(
-    name = "daylog",
+    name = "vitalog",
     version,
     about = "A terminal dashboard that tracks your life from markdown notes"
 )]
