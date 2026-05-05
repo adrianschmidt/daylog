@@ -9,7 +9,7 @@ homepage = "https://github.com/adrianschmidt/vitalog"
 readme = "README.md"
 keywords = ["tui", "dashboard", "life-tracking", "markdown", "terminal"]
 categories = ["command-line-utilities"]
-exclude = ["tapes/", ".claude/", ".github/"]
+exclude = [".claude/", ".github/"]
 
 [dependencies]
 ratatui = "0.29"
