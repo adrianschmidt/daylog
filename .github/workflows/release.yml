@@ -16,7 +16,8 @@ jobs:
     permissions:
       contents: read
     outputs:
-      version: ${{ steps.semrel.outputs.version }}
+      version: ${{ steps.semrel.outputs.new_release_version }}
+      published: ${{ steps.semrel.outputs.new_release_published }}
     steps:
       - uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547  # v1
         id: app-token
@@ -27,34 +28,21 @@ jobs:
         with:
           fetch-depth: 0
           token: ${{ steps.app-token.outputs.token }}
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
-        with:
-          node-version: lts/*
-      - name: Determine next version (dry run)
+      - uses: cycjimmy/semantic-release-action@b12c8f6015dc215fe37bc154d4ad456dd3833c90  # v6.0.0
         id: semrel
+        with:
+          dry_run: true
+          extra_plugins: |
+            @semantic-release/changelog
+            @semantic-release/exec
+            @semantic-release/git
         env:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
-        run: |
-          set -euo pipefail
-          out=$(npx --yes \
-            -p semantic-release@latest \
-            -p @semantic-release/changelog \
-            -p @semantic-release/exec \
-            -p @semantic-release/git \
-            semantic-release --dry-run 2>&1) || true
-          echo "$out"
-          version=$(printf '%s\n' "$out" | sed -nE 's/.*The next release version is ([0-9.]+).*/\1/p' | head -n1)
-          if [ -n "$version" ]; then
-            echo "version=$version" >> "$GITHUB_OUTPUT"
-            echo "Next release: $version"
-          else
-            echo "No release needed."
-          fi
 
   prepare:
     name: Prepare workspace
     needs: analyze
-    if: needs.analyze.outputs.version != ''
+    if: needs.analyze.outputs.published == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -76,7 +64,7 @@ jobs:
   build:
     name: Build (${{ matrix.target }})
     needs: [analyze, prepare]
-    if: needs.analyze.outputs.version != ''
+    if: needs.analyze.outputs.published == 'true'
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -131,7 +119,7 @@ jobs:
   publish:
     name: Publish
     needs: [analyze, build]
-    if: needs.analyze.outputs.version != ''
+    if: needs.analyze.outputs.published == 'true'
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -154,17 +142,15 @@ jobs:
       - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
         with:
           path: dist
-      - name: semantic-release
+      - uses: cycjimmy/semantic-release-action@b12c8f6015dc215fe37bc154d4ad456dd3833c90  # v6.0.0
+        with:
+          extra_plugins: |
+            @semantic-release/changelog
+            @semantic-release/exec
+            @semantic-release/git
         env:
           GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
           GIT_AUTHOR_NAME: vitalog-release-bot
           GIT_AUTHOR_EMAIL: vitalog-release-bot@users.noreply.github.com
           GIT_COMMITTER_NAME: vitalog-release-bot
           GIT_COMMITTER_EMAIL: vitalog-release-bot@users.noreply.github.com
-        run: |
-          npx --yes \
-            -p semantic-release@latest \
-            -p @semantic-release/changelog \
-            -p @semantic-release/exec \
-            -p @semantic-release/git \
-            semantic-release
