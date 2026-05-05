@@ -7,6 +7,7 @@ pub mod demo;
 pub mod food_sum;
 pub mod frontmatter;
 pub mod goals;
+pub mod legacy;
 pub mod materializer;
 pub mod modules;
 pub mod state;
