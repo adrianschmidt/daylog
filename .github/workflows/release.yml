@@ -2,12 +2,81 @@ name: Release
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: release
+  cancel-in-progress: false
 
 jobs:
+  analyze:
+    name: Analyze
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.semrel.outputs.version }}
+    steps:
+      - uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547  # v1
+        id: app-token
+        with:
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
+        with:
+          node-version: lts/*
+      - name: Determine next version (dry run)
+        id: semrel
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+          out=$(npx --yes \
+            -p semantic-release@latest \
+            -p @semantic-release/changelog \
+            -p @semantic-release/exec \
+            -p @semantic-release/git \
+            semantic-release --dry-run 2>&1) || true
+          echo "$out"
+          version=$(printf '%s\n' "$out" | sed -nE 's/.*The next release version is ([0-9.]+).*/\1/p' | head -n1)
+          if [ -n "$version" ]; then
+            echo "version=$version" >> "$GITHUB_OUTPUT"
+            echo "Next release: $version"
+          else
+            echo "No release needed."
+          fi
+
+  prepare:
+    name: Prepare workspace
+    needs: analyze
+    if: needs.analyze.outputs.version != ''
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+        with:
+          fetch-depth: 1
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae  # v2
+      - name: Bump Cargo.toml + Cargo.lock
+        run: scripts/bump-cargo.sh ${{ needs.analyze.outputs.version }}
+      - name: Tar bumped manifest + lock
+        run: tar czf bumped-workspace.tar.gz Cargo.toml Cargo.lock
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+        with:
+          name: bumped-workspace
+          path: bumped-workspace.tar.gz
+
   build:
     name: Build (${{ matrix.target }})
+    needs: [analyze, prepare]
+    if: needs.analyze.outputs.version != ''
     runs-on: ${{ matrix.os }}
     permissions:
       contents: read
@@ -16,58 +85,86 @@ jobs:
         include:
           - target: x86_64-unknown-linux-gnu
             os: ubuntu-latest
-            binary: daylog
+            binary: vitalog
+            archive: tar
           - target: x86_64-apple-darwin
             os: macos-latest
-            binary: daylog
+            binary: vitalog
+            archive: tar
           - target: aarch64-apple-darwin
             os: macos-latest
-            binary: daylog
+            binary: vitalog
+            archive: tar
           - target: x86_64-pc-windows-msvc
             os: windows-latest
-            binary: daylog.exe
-
+            binary: vitalog.exe
+            archive: zip
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
+        with:
+          name: bumped-workspace
+      - name: Apply bumped manifest + lock
+        shell: bash
+        run: tar xzf bumped-workspace.tar.gz
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
         with:
           targets: ${{ matrix.target }}
-      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae # v2
-
+      - uses: Swatinem/rust-cache@42dc69e1aa15d09112580998cf2ef0119e2e91ae  # v2
       - name: Build
         run: cargo build --release --target ${{ matrix.target }}
-
       - name: Package (Unix)
-        if: matrix.os != 'windows-latest'
+        if: matrix.archive == 'tar'
         run: |
           cd target/${{ matrix.target }}/release
-          tar czf ../../../daylog-${{ matrix.target }}.tar.gz ${{ matrix.binary }}
-
+          tar czf ../../../vitalog-${{ matrix.target }}.tar.gz ${{ matrix.binary }}
       - name: Package (Windows)
-        if: matrix.os == 'windows-latest'
+        if: matrix.archive == 'zip'
         run: |
           cd target/${{ matrix.target }}/release
-          7z a ../../../daylog-${{ matrix.target }}.zip ${{ matrix.binary }}
-
-      - name: Upload artifact
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+          7z a ../../../vitalog-${{ matrix.target }}.zip ${{ matrix.binary }}
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
-          name: daylog-${{ matrix.target }}
-          path: daylog-${{ matrix.target }}.*
+          name: vitalog-${{ matrix.target }}
+          path: vitalog-${{ matrix.target }}.*
 
-  release:
-    name: Release
-    needs: build
+  publish:
+    name: Publish
+    needs: [analyze, build]
+    if: needs.analyze.outputs.version != ''
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      issues: write
+      pull-requests: write
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+      - uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547  # v1
+        id: app-token
         with:
-          path: artifacts
-      - name: Create release
-        uses: softprops/action-gh-release@153bb8e04406b158c6c84fc1615b65b24149a1fe # v2
+          app-id: ${{ secrets.APP_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
         with:
-          files: artifacts/**/*
-          generate_release_notes: true
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
+        with:
+          node-version: lts/*
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
+        with:
+          path: dist
+      - name: semantic-release
+        env:
+          GITHUB_TOKEN: ${{ steps.app-token.outputs.token }}
+          GIT_AUTHOR_NAME: vitalog-release-bot
+          GIT_AUTHOR_EMAIL: vitalog-release-bot@users.noreply.github.com
+          GIT_COMMITTER_NAME: vitalog-release-bot
+          GIT_COMMITTER_EMAIL: vitalog-release-bot@users.noreply.github.com
+        run: |
+          npx --yes \
+            -p semantic-release@latest \
+            -p @semantic-release/changelog \
+            -p @semantic-release/exec \
+            -p @semantic-release/git \
+            semantic-release
