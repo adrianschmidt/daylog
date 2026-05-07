@@ -398,8 +398,41 @@ pub fn render_json(data: &TrendData) -> serde_json::Value {
     })
 }
 
-pub fn execute(_field: &str, _days: u32, _compact: bool, _json: bool, _config: &Config) -> Result<()> {
-    color_eyre::eyre::bail!("trend command not yet implemented");
+pub fn execute(
+    field: &str,
+    days: u32,
+    compact: bool,
+    json: bool,
+    config: &Config,
+) -> Result<()> {
+    if days == 0 {
+        return Err(eyre!("--days must be at least 1"));
+    }
+
+    let registry = crate::modules::build_registry(config);
+    let db_path = config.db_path();
+
+    // Sync notes → DB so freshly-edited markdown shows up.
+    {
+        let conn = crate::db::open_rw(&db_path)?;
+        crate::db::init_db(&conn, &registry)?;
+        crate::modules::validate_module_tables(&registry)?;
+        crate::materializer::sync_all(&conn, &config.notes_dir_path(), config, &registry)?;
+    }
+
+    let conn = crate::db::open_ro(&db_path)?;
+    let today = config.effective_today_date();
+    let data = assemble(field, days, config, &conn, today)?;
+
+    if json {
+        let v = render_json(&data);
+        println!("{}", serde_json::to_string_pretty(&v)?);
+    } else if compact {
+        print!("{}", render_compact(&data));
+    } else {
+        print!("{}", render_chart(&data));
+    }
+    Ok(())
 }
 
 /// Mean / min / max / OLS slope over the values in `points`. Days with
