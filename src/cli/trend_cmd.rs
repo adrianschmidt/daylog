@@ -155,10 +155,9 @@ pub fn build_window(
                  ORDER BY date ASC",
             )?;
             let result = stmt
-                .query_map(
-                    rusqlite::params![name, &from_str, &to_str],
-                    |r| Ok((r.get(0)?, r.get(1)?)),
-                )?
+                .query_map(rusqlite::params![name, &from_str, &to_str], |r| {
+                    Ok((r.get(0)?, r.get(1)?))
+                })?
                 .collect::<std::result::Result<Vec<_>, _>>()?;
             result
         }
@@ -398,13 +397,7 @@ pub fn render_json(data: &TrendData) -> serde_json::Value {
     })
 }
 
-pub fn execute(
-    field: &str,
-    days: u32,
-    compact: bool,
-    json: bool,
-    config: &Config,
-) -> Result<()> {
+pub fn execute(field: &str, days: u32, compact: bool, json: bool, config: &Config) -> Result<()> {
     if days == 0 {
         return Err(eyre!("--days must be at least 1"));
     }
@@ -457,7 +450,10 @@ pub fn compute_stats(points: &[(NaiveDate, Option<f64>)]) -> TrendStats {
     }
     let mean = xs_ys.iter().map(|(_, y)| *y).sum::<f64>() / count as f64;
     let min = xs_ys.iter().map(|(_, y)| *y).fold(f64::INFINITY, f64::min);
-    let max = xs_ys.iter().map(|(_, y)| *y).fold(f64::NEG_INFINITY, f64::max);
+    let max = xs_ys
+        .iter()
+        .map(|(_, y)| *y)
+        .fold(f64::NEG_INFINITY, f64::max);
     let (slope_per_day, slope_per_week) = if count < 2 {
         (None, None)
     } else {
@@ -473,7 +469,10 @@ pub fn compute_stats(points: &[(NaiveDate, Option<f64>)]) -> TrendStats {
             .sum();
         // xs come from enumerate(), so with count >= 2 there are always at least
         // two distinct indices (0, 1, …) — den cannot be zero.
-        debug_assert!(den != 0.0, "denominator must be non-zero: enumerate() guarantees distinct x values");
+        debug_assert!(
+            den != 0.0,
+            "denominator must be non-zero: enumerate() guarantees distinct x values"
+        );
         let slope = num / den;
         (Some(slope), Some(slope * 7.0))
     };
@@ -509,7 +508,8 @@ mod tests {
 
     fn empty_db() -> rusqlite::Connection {
         let conn = rusqlite::Connection::open_in_memory().unwrap();
-        conn.execute_batch(crate::db::CORE_SCHEMA_TEST_HOOK).unwrap();
+        conn.execute_batch(crate::db::CORE_SCHEMA_TEST_HOOK)
+            .unwrap();
         conn
     }
 
@@ -702,10 +702,10 @@ mod tests {
         .unwrap();
 
         let pts = build_window(&metric_field("rh"), &conn, d(2026, 1, 1), d(2026, 1, 2)).unwrap();
-        assert_eq!(pts, vec![
-            (d(2026, 1, 1), Some(60.0)),
-            (d(2026, 1, 2), None),
-        ]);
+        assert_eq!(
+            pts,
+            vec![(d(2026, 1, 1), Some(60.0)), (d(2026, 1, 2), None),]
+        );
     }
 
     #[test]
@@ -740,7 +740,14 @@ mod tests {
         let from = points.first().map(|(d, _)| *d).unwrap_or(d(2026, 1, 1));
         let to = points.last().map(|(d, _)| *d).unwrap_or(from);
         let stats = compute_stats(&points);
-        TrendData { field, days, from, to, points, stats }
+        TrendData {
+            field,
+            days,
+            from,
+            to,
+            points,
+            stats,
+        }
     }
 
     #[test]
@@ -795,13 +802,15 @@ mod tests {
 
     #[test]
     fn chart_no_data_short_circuits() {
-        let pts: Vec<(NaiveDate, Option<f64>)> = (0..3)
-            .map(|i| (d(2026, 1, (i + 1) as u32), None))
-            .collect();
+        let pts: Vec<(NaiveDate, Option<f64>)> =
+            (0..3).map(|i| (d(2026, 1, (i + 1) as u32), None)).collect();
         let data = make_data(weight_field("kg"), 3, pts);
         let s = render_chart(&data);
         assert!(s.contains("weight (last 3 days, kg)"), "got: {s}");
-        assert!(s.contains("no data for weight in the last 3 days"), "got: {s}");
+        assert!(
+            s.contains("no data for weight in the last 3 days"),
+            "got: {s}"
+        );
         assert!(!s.contains("┤"), "should skip axis when empty: {s}");
     }
 
@@ -859,7 +868,10 @@ mod tests {
         for line in s.lines().filter(|l| l.contains('┤')) {
             // chars before '┤'
             let label = line.split('┤').next().unwrap();
-            assert!(!label.contains('.'), "y-label should be integer: '{label}' in:\n{s}");
+            assert!(
+                !label.contains('.'),
+                "y-label should be integer: '{label}' in:\n{s}"
+            );
         }
         // No unit in title
         assert!(s.contains("mood (last 3 days)"), "got:\n{s}");
@@ -895,9 +907,8 @@ mod tests {
 
     #[test]
     fn json_empty_window_has_null_stats() {
-        let pts: Vec<(NaiveDate, Option<f64>)> = (0..3)
-            .map(|i| (d(2026, 1, (i + 1) as u32), None))
-            .collect();
+        let pts: Vec<(NaiveDate, Option<f64>)> =
+            (0..3).map(|i| (d(2026, 1, (i + 1) as u32), None)).collect();
         let data = make_data(weight_field("kg"), 3, pts);
         let v = render_json(&data);
         assert_eq!(v["stats"]["count"], 0);

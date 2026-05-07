@@ -56,7 +56,12 @@ fn main() -> Result<()> {
             time,
         }) => cmd_bp(sys, dia, pulse, morning, evening, date, time, quiet),
         Some(Commands::Today { date, json }) => cmd_today(date, json),
-        Some(Commands::Trend { field, days, compact, json }) => cmd_trend(field, days, compact, json),
+        Some(Commands::Trend {
+            field,
+            days,
+            compact,
+            json,
+        }) => cmd_trend(field, days, compact, json),
         None => cmd_run(),
     }
 }
