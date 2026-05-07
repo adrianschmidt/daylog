@@ -78,7 +78,10 @@ pub fn compute_stats(points: &[(NaiveDate, Option<f64>)]) -> TrendStats {
             .iter()
             .map(|(x, _)| (*x as f64 - x_mean).powi(2))
             .sum();
-        let slope = if den == 0.0 { 0.0 } else { num / den };
+        // xs come from enumerate(), so with count >= 2 there are always at least
+        // two distinct indices (0, 1, …) — den cannot be zero.
+        debug_assert!(den != 0.0, "denominator must be non-zero: enumerate() guarantees distinct x values");
+        let slope = num / den;
         (Some(slope), Some(slope * 7.0))
     };
     TrendStats {
@@ -113,6 +116,10 @@ mod tests {
         let stats = compute_stats(&pts);
         assert_eq!(stats.count, 0);
         assert!(stats.mean.is_none());
+        assert!(stats.min.is_none());
+        assert!(stats.max.is_none());
+        assert!(stats.slope_per_day.is_none());
+        assert!(stats.slope_per_week.is_none());
     }
 
     #[test]
