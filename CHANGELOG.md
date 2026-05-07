@@ -1,3 +1,10 @@
+## [1.0.3](https://github.com/adrianschmidt/vitalog/compare/v1.0.2...v1.0.3) (2026-05-07)
+
+
+### Bug Fixes
+
+* **today:** sync notes before reading summary ([af0d3ba](https://github.com/adrianschmidt/vitalog/commit/af0d3ba6d55fe2a82aaa47912568db425c1ff151))
+
 ## [1.0.2](https://github.com/adrianschmidt/vitalog/compare/v1.0.1...v1.0.2) (2026-05-07)
 
 
