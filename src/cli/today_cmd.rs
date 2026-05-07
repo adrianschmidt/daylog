@@ -60,15 +60,7 @@ pub fn execute(date: Option<&str>, json: bool, config: &Config) -> Result<()> {
         None => config.effective_today_date(),
     };
 
-    let db_path = config.db_path();
-    if !db_path.exists() {
-        color_eyre::eyre::bail!(
-            "Database not found at {}. Run `vitalog init` or `vitalog sync` first.",
-            db_path.display()
-        );
-    }
-    let conn = crate::db::open_ro(&db_path)?;
-    let mut summary = assemble(date, config, &conn)?;
+    let mut summary = build_summary(date, config)?;
 
     let goals = crate::goals::load_goals(&config.notes_dir_path())?;
 
@@ -102,6 +94,28 @@ pub fn execute(date: Option<&str>, json: bool, config: &Config) -> Result<()> {
         print!("{}", render_text(&summary, &goals, color));
     }
     Ok(())
+}
+
+/// Sync the DB from notes, then assemble the summary. Hand-edits to YAML
+/// or writes from `vitalog log` only touch the markdown file; without a
+/// pre-read sync the days/metrics tables would be stale and surface as
+/// `not logged`. Sync errors are swallowed so a single malformed note
+/// does not block `vitalog today` (matches the TUI's startup behavior in
+/// `app::run`). See issue #27.
+fn build_summary(date: NaiveDate, config: &Config) -> Result<DaySummary> {
+    let db_path = config.db_path();
+    if !db_path.exists() {
+        color_eyre::eyre::bail!(
+            "Database not found at {}. Run `vitalog init` or `vitalog sync` first.",
+            db_path.display()
+        );
+    }
+    let conn = crate::db::open_rw(&db_path)?;
+    let registry = crate::modules::build_registry(config);
+    crate::db::init_db(&conn, &registry)?;
+    crate::modules::validate_module_tables(&registry)?;
+    let _ = crate::materializer::sync_all(&conn, &config.notes_dir_path(), config, &registry);
+    assemble(date, config, &conn)
 }
 
 pub fn assemble(date: NaiveDate, config: &Config, conn: &Connection) -> Result<DaySummary> {
@@ -991,6 +1005,53 @@ mod tests {
         assert_eq!(summary.food, FoodTotals::default());
         assert!(summary.day.weight.is_none());
         assert!(summary.bp_morning.is_none());
+    }
+
+    /// Regression: `vitalog log metric ...` writes to YAML only, so a
+    /// subsequent `vitalog today` previously rendered the value as
+    /// `not logged`. `build_summary` must sync the DB from notes before
+    /// reading so the just-written value shows up. See issue #27.
+    #[test]
+    fn build_summary_syncs_log_writes_before_reading_metrics() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let toml_str = format!(
+            "notes_dir = '{}'\ntime_format = '24h'\nweight_unit = 'kg'\n\
+             [metrics]\nbrushed_morning = {{ display = \"Brush AM\", color = \"green\" }}\n",
+            dir.path().display().to_string().replace('\\', "/")
+        );
+        let config: Config = toml::from_str(&toml_str).unwrap();
+
+        let registry = crate::modules::build_registry(&config);
+        {
+            let conn = db::open_rw(&config.db_path()).unwrap();
+            db::init_db(&conn, &registry).unwrap();
+            crate::modules::validate_module_tables(&registry).unwrap();
+            crate::materializer::sync_all(&conn, &config.notes_dir_path(), &config, &registry)
+                .unwrap();
+        }
+
+        crate::cli::log_cmd::execute(
+            "metric",
+            &["brushed_morning".into(), "1".into()],
+            &config,
+            &registry,
+        )
+        .unwrap();
+
+        let date = config.effective_today_date();
+        let summary = build_summary(date, &config).unwrap();
+
+        let metric = summary
+            .custom_metrics
+            .iter()
+            .find(|m| m.id == "brushed_morning")
+            .expect("custom metric should be registered in summary");
+        assert_eq!(
+            metric.value,
+            Some(1.0),
+            "metric should be synced from YAML before read; got {:?}",
+            metric.value
+        );
     }
 
     #[test]
