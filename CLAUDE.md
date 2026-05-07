@@ -56,8 +56,12 @@ src/
     completions.rs     Shell completion generation
     food_cmd.rs        `vitalog food` — nutrition-db lookup, scaling, custom flags
     log_cmd.rs         `vitalog log` — write to today's note
+    migrate_cmd.rs     `vitalog migrate` — schema migrations
     note_cmd.rs        `vitalog note` — alias resolution + body append
     readme_cmd.rs      `vitalog readme` — print embedded README.md to stdout
+    sleep_cmd.rs       `vitalog sleep-start` / `sleep-end` — bedtime tracking
+    today_cmd.rs       `vitalog today` — compact daily summary (food, weight, sleep, BP)
+    trend_cmd.rs       `vitalog trend` — sparkline / chart / JSON for a field
   modules/
     mod.rs             Module trait + registry + InsertOp + YamlPath + parse_color
     dashboard.rs       Today's vitals (sleep, weight, mood, energy)

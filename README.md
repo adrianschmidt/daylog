@@ -189,6 +189,21 @@ vitalog today 2026-04-29         # any past date
 vitalog today --json             # JSON for tooling
 ```
 
+### Trend charts
+
+`vitalog trend <field> [days]` prints a chart of recent values for any
+DB-resident field. Useful when daily fluctuation hides the underlying trend.
+
+```bash
+vitalog trend weight              # 14-day ASCII chart
+vitalog trend weight 30           # 30-day window
+vitalog trend weight --compact    # one-line sparkline
+vitalog trend resting_hr --json   # structured output
+```
+
+Built-in fields: `weight`, `sleep_hours`, `mood`, `energy`. Anything in your
+`[metrics]` config also works.
+
 ## Goals
 
 Goals live in `goals.md` in your notes directory. The body is
