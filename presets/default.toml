@@ -1,5 +1,5 @@
-notes_dir = "~/daylog-notes"
-# db_path defaults to {notes_dir}/.daylog.db
+notes_dir = "~/vitalog-notes"
+# db_path defaults to {notes_dir}/.vitalog.db
 # refresh_secs = 15
 # day_start_hour = 0  # Hour (0-23) when a new day starts (top-level key).
                        # E.g., 4 means anything before 4 AM counts as yesterday.
@@ -33,7 +33,7 @@ rdl = { display = "RDL", color = "red" }
 # meditation_min = { display = "Meditation", color = "magenta", unit = "min" }
 
 # [notes.aliases]
-# Short keys that `daylog note <key>` expands to fixed text.
+# Short keys that `vitalog note <key>` expands to fixed text.
 # med-morning = "Morgonmedicin (Elvanse 70mg, Escitalopram 20mg, ...)"
 # med-evening = "Kvällsmedicin (Escitalopram 10mg, ...)"
 
