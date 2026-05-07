@@ -341,11 +341,12 @@ pub fn render_chart(data: &TrendData) -> String {
     let to_str = data.to.format("%m-%d").to_string();
     let total_width = data.points.len() * COL_WIDTH;
     let pad = total_width.saturating_sub(from_str.len() + to_str.len());
+    let separator_pad = pad.max(1);
     out.push_str(&format!(
         "{} {}{}{}\n",
         " ".repeat(Y_LABEL_WIDTH),
         from_str,
-        " ".repeat(pad),
+        " ".repeat(separator_pad),
         to_str
     ));
 
@@ -410,7 +411,7 @@ pub fn execute(field: &str, days: u32, compact: bool, json: bool, config: &Confi
         let conn = crate::db::open_rw(&db_path)?;
         crate::db::init_db(&conn, &registry)?;
         crate::modules::validate_module_tables(&registry)?;
-        crate::materializer::sync_all(&conn, &config.notes_dir_path(), config, &registry)?;
+        let _ = crate::materializer::sync_all(&conn, &config.notes_dir_path(), config, &registry);
     }
 
     let conn = crate::db::open_ro(&db_path)?;

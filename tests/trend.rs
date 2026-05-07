@@ -80,6 +80,20 @@ fn trend_weight_chart_includes_axis_and_stats() {
     assert!(chart.contains("┤"));
     assert!(chart.contains("04-25"));
     assert!(chart.contains("04-28"));
+    let date_line = chart
+        .lines()
+        .find(|l| l.contains("04-25") && l.contains("04-28"))
+        .expect("date-label line should contain both dates");
+    assert!(
+        date_line.contains("04-25") && date_line.contains("04-28"),
+        "got: {date_line}"
+    );
+    // Verify there's whitespace between the two dates (not the same chars adjacent).
+    let after_first = date_line.split_once("04-25").unwrap().1;
+    assert!(
+        after_first.starts_with(' ') || after_first.starts_with("  "),
+        "expected whitespace between date labels, got: {date_line:?}"
+    );
     assert!(chart.contains("mean:"));
     assert!(chart.contains("linear trend:"));
 }
