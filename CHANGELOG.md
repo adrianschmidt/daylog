@@ -1,3 +1,10 @@
+## [1.0.2](https://github.com/adrianschmidt/vitalog/compare/v1.0.1...v1.0.2) (2026-05-07)
+
+
+### Bug Fixes
+
+* **today:** render target alongside min/max in text output ([f1adc7e](https://github.com/adrianschmidt/vitalog/commit/f1adc7ec3a69c6700c265c4f6d912a7f177c5e41)), closes [#19](https://github.com/adrianschmidt/vitalog/issues/19)
+
 ## [1.0.1](https://github.com/adrianschmidt/vitalog/compare/v1.0.0...v1.0.1) (2026-05-07)
 
 
