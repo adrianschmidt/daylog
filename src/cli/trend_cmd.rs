@@ -1,5 +1,7 @@
 //! `vitalog trend <field> [days]` — print a chart of recent values.
 
+use std::collections::HashMap;
+
 use chrono::NaiveDate;
 use color_eyre::eyre::{eyre, Result};
 use rusqlite::{Connection, OptionalExtension};
@@ -103,6 +105,59 @@ pub fn resolve_field(name: &str, config: &Config, conn: &Connection) -> Result<T
         "unknown field '{name}'. Known fields: {}",
         known.join(", ")
     ))
+}
+
+/// Query the relevant table for `field` over `[from, to]` (inclusive),
+/// then expand to a Vec spanning every day in the window — gap days
+/// carry `None`. Rows with NULL values are filtered at the SQL layer
+/// (treated as gaps).
+pub fn build_window(
+    field: &TrendField,
+    conn: &Connection,
+    from: NaiveDate,
+    to: NaiveDate,
+) -> Result<Vec<(NaiveDate, Option<f64>)>> {
+    let from_str = from.format("%Y-%m-%d").to_string();
+    let to_str = to.format("%Y-%m-%d").to_string();
+    let rows: Vec<(String, f64)> = match &field.source {
+        TrendSource::DaysColumn(col) => {
+            // Safe: `col` is a &'static str from the BUILTINS allowlist.
+            let sql = format!(
+                "SELECT date, {col} FROM days \
+                 WHERE date BETWEEN ?1 AND ?2 AND {col} IS NOT NULL \
+                 ORDER BY date ASC"
+            );
+            let mut stmt = conn.prepare(&sql)?;
+            let result = stmt
+                .query_map([&from_str, &to_str], |r| Ok((r.get(0)?, r.get(1)?)))?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            result
+        }
+        TrendSource::Metric(name) => {
+            let mut stmt = conn.prepare(
+                "SELECT date, value FROM metrics \
+                 WHERE name = ?1 AND date BETWEEN ?2 AND ?3 \
+                 ORDER BY date ASC",
+            )?;
+            let result = stmt
+                .query_map(
+                    rusqlite::params![name, &from_str, &to_str],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )?
+                .collect::<std::result::Result<Vec<_>, _>>()?;
+            result
+        }
+    };
+    let map: HashMap<String, f64> = rows.into_iter().collect();
+    let total_days = (to - from).num_days() as usize + 1;
+    let mut out = Vec::with_capacity(total_days);
+    let mut day = from;
+    while day <= to {
+        let key = day.format("%Y-%m-%d").to_string();
+        out.push((day, map.get(&key).copied()));
+        day = day.succ_opt().expect("date overflow inside trend window");
+    }
+    Ok(out)
 }
 
 pub fn execute(_field: &str, _days: u32, _compact: bool, _json: bool, _config: &Config) -> Result<()> {
@@ -311,5 +366,82 @@ mod tests {
         let stats = compute_stats(&pts);
         let slope = stats.slope_per_day.unwrap();
         assert!((slope - 0.5).abs() < 1e-9, "got {slope}");
+    }
+
+    fn seed_day(conn: &rusqlite::Connection, date: &str, weight: Option<f64>) {
+        conn.execute(
+            "INSERT INTO days (date, weight, file_mtime) VALUES (?1, ?2, 0.0)",
+            rusqlite::params![date, weight],
+        )
+        .unwrap();
+    }
+
+    fn weight_field(unit: &str) -> TrendField {
+        TrendField {
+            name: "weight".to_string(),
+            source: TrendSource::DaysColumn("weight"),
+            display: "weight".to_string(),
+            unit: Some(unit.to_string()),
+            integer_valued: false,
+        }
+    }
+
+    fn metric_field(name: &str) -> TrendField {
+        TrendField {
+            name: name.to_string(),
+            source: TrendSource::Metric(name.to_string()),
+            display: name.to_string(),
+            unit: None,
+            integer_valued: false,
+        }
+    }
+
+    #[test]
+    fn build_window_days_field_fills_gaps_with_none() {
+        let conn = empty_db();
+        seed_day(&conn, "2026-01-01", Some(120.0));
+        seed_day(&conn, "2026-01-02", None); // present but no weight
+        seed_day(&conn, "2026-01-04", Some(121.5));
+        // 2026-01-03 not seeded at all
+
+        let from = d(2026, 1, 1);
+        let to = d(2026, 1, 4);
+        let pts = build_window(&weight_field("kg"), &conn, from, to).unwrap();
+        assert_eq!(pts.len(), 4);
+        assert_eq!(pts[0], (d(2026, 1, 1), Some(120.0)));
+        assert_eq!(pts[1], (d(2026, 1, 2), None));
+        assert_eq!(pts[2], (d(2026, 1, 3), None));
+        assert_eq!(pts[3], (d(2026, 1, 4), Some(121.5)));
+    }
+
+    #[test]
+    fn build_window_metric_field_filters_by_name() {
+        let conn = empty_db();
+        seed_day(&conn, "2026-01-01", None);
+        seed_day(&conn, "2026-01-02", None);
+        conn.execute(
+            "INSERT INTO metrics (date, name, value) VALUES ('2026-01-01', 'rh', 60.0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO metrics (date, name, value) VALUES ('2026-01-02', 'other', 99.0)",
+            [],
+        )
+        .unwrap();
+
+        let pts = build_window(&metric_field("rh"), &conn, d(2026, 1, 1), d(2026, 1, 2)).unwrap();
+        assert_eq!(pts, vec![
+            (d(2026, 1, 1), Some(60.0)),
+            (d(2026, 1, 2), None),
+        ]);
+    }
+
+    #[test]
+    fn build_window_empty_returns_all_none() {
+        let conn = empty_db();
+        let pts = build_window(&weight_field("kg"), &conn, d(2026, 1, 1), d(2026, 1, 3)).unwrap();
+        assert_eq!(pts.len(), 3);
+        assert!(pts.iter().all(|(_, v)| v.is_none()));
     }
 }
