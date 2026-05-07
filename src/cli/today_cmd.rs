@@ -446,11 +446,19 @@ fn render_weight_row(summary: &DaySummary, threshold: Option<&Threshold>, color:
         Some(t) => format_threshold_inline(t, &unit),
         None => String::new(),
     };
+    let annotation = match threshold {
+        Some(t) => annotate_value(value, t, color),
+        None => String::new(),
+    };
     let mut line = if goal_part.is_empty() {
         format!("Weight:    {} {unit}", trim_num(value))
     } else {
         format!("Weight:    {} {unit} / {goal_part}", trim_num(value))
     };
+    if !annotation.is_empty() {
+        line.push_str("     ");
+        line.push_str(&annotation);
+    }
     if let Some((delta, prev_date)) = summary.weight_delta {
         let label = format_delta_label(summary.date, prev_date);
         let sign = if delta >= 0.0 { "+" } else { "" };
@@ -753,6 +761,63 @@ mod tests {
         assert!(out.contains("Sleep:     6h 24min"), "got:\n{out}");
         assert!(out.contains("BP morning:"), "got:\n{out}");
         assert!(out.contains("not logged"), "got:\n{out}");
+    }
+
+    #[test]
+    fn render_text_weight_above_max_annotates() {
+        // vitalog#18: weight row should annotate over-max values like food rows do.
+        let mut s = fixture_summary();
+        s.day.weight = Some(119.4);
+        s.weight_delta = Some((0.2, NaiveDate::from_ymd_opt(2026, 4, 29).unwrap()));
+        let mut g = fixture_goals();
+        g.thresholds.insert(
+            "weight".into(),
+            Threshold {
+                min: None,
+                max: Some(110.0),
+                target: None,
+            },
+        );
+        let out = render_text(&s, &g, false);
+        assert!(out.contains("Weight:    119.4 kg / ≤110 kg"), "got:\n{out}");
+        assert!(out.contains("9 above max"), "got:\n{out}");
+        assert!(out.contains("Δ +0.2 vs yesterday"), "got:\n{out}");
+    }
+
+    #[test]
+    fn render_text_weight_within_range_annotates() {
+        let mut s = fixture_summary();
+        s.day.weight = Some(95.0);
+        s.weight_delta = None;
+        let mut g = fixture_goals();
+        g.thresholds.insert(
+            "weight".into(),
+            Threshold {
+                min: Some(80.0),
+                max: Some(110.0),
+                target: None,
+            },
+        );
+        let out = render_text(&s, &g, false);
+        assert!(out.contains("80–110 kg"), "got:\n{out}");
+        assert!(out.contains("✓ within range"), "got:\n{out}");
+    }
+
+    #[test]
+    fn render_text_weight_target_only_no_annotation() {
+        // Target-only threshold should produce no annotation for the weight row
+        // (matches annotate_value behavior for target-only thresholds).
+        let s = fixture_summary();
+        let g = fixture_goals(); // weight has target: Some(110.0), no min/max
+        let out = render_text(&s, &g, false);
+        let weight_line = out
+            .lines()
+            .find(|l| l.starts_with("Weight:"))
+            .expect("weight row");
+        assert!(weight_line.contains("→ 110 kg"), "got: {weight_line}");
+        assert!(!weight_line.contains("above max"), "got: {weight_line}");
+        assert!(!weight_line.contains("below min"), "got: {weight_line}");
+        assert!(!weight_line.contains("within range"), "got: {weight_line}");
     }
 
     #[test]
