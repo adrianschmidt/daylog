@@ -1,7 +1,8 @@
 //! `vitalog trend <field> [days]` — print a chart of recent values.
 
 use chrono::NaiveDate;
-use color_eyre::eyre::Result;
+use color_eyre::eyre::{eyre, Result};
+use rusqlite::{Connection, OptionalExtension};
 
 use crate::config::Config;
 
@@ -36,6 +37,72 @@ pub struct TrendStats {
     pub slope_per_day: Option<f64>,
     /// `slope_per_day * 7`.
     pub slope_per_week: Option<f64>,
+}
+
+/// Built-in fields served by the `days` table.
+/// (name, column, integer_valued)
+const BUILTINS: &[(&str, &str, bool)] = &[
+    ("weight", "weight", false),
+    ("sleep_hours", "sleep_hours", false),
+    ("mood", "mood", true),
+    ("energy", "energy", true),
+];
+
+/// Resolve a user-supplied field name into a `TrendField`. Tries built-ins
+/// first, then `config.metrics`, then a soft-resolve against historical
+/// rows in the `metrics` table (so a previously-configured-now-removed
+/// metric still works).
+pub fn resolve_field(name: &str, config: &Config, conn: &Connection) -> Result<TrendField> {
+    for (bname, col, int_valued) in BUILTINS {
+        if name == *bname {
+            let unit = match *bname {
+                "weight" => Some(config.weight_unit.to_string()),
+                "sleep_hours" => Some("h".to_string()),
+                _ => None,
+            };
+            return Ok(TrendField {
+                name: name.to_string(),
+                source: TrendSource::DaysColumn(col),
+                display: name.to_string(),
+                unit,
+                integer_valued: *int_valued,
+            });
+        }
+    }
+    if let Some(m) = config.metrics.get(name) {
+        return Ok(TrendField {
+            name: name.to_string(),
+            source: TrendSource::Metric(name.to_string()),
+            display: m.display.clone(),
+            unit: m.unit.clone(),
+            integer_valued: false,
+        });
+    }
+    let exists: bool = conn
+        .query_row(
+            "SELECT 1 FROM metrics WHERE name = ?1 LIMIT 1",
+            [name],
+            |_| Ok(true),
+        )
+        .optional()?
+        .unwrap_or(false);
+    if exists {
+        return Ok(TrendField {
+            name: name.to_string(),
+            source: TrendSource::Metric(name.to_string()),
+            display: name.to_string(),
+            unit: None,
+            integer_valued: false,
+        });
+    }
+    let mut known: Vec<String> = BUILTINS.iter().map(|(n, _, _)| n.to_string()).collect();
+    let mut configured: Vec<String> = config.metrics.keys().cloned().collect();
+    configured.sort();
+    known.extend(configured);
+    Err(eyre!(
+        "unknown field '{name}'. Known fields: {}",
+        known.join(", ")
+    ))
 }
 
 pub fn execute(_field: &str, _days: u32, _compact: bool, _json: bool, _config: &Config) -> Result<()> {
@@ -97,9 +164,93 @@ pub fn compute_stats(points: &[(NaiveDate, Option<f64>)]) -> TrendStats {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::config::Config;
 
     fn d(y: i32, m: u32, day: u32) -> NaiveDate {
         NaiveDate::from_ymd_opt(y, m, day).unwrap()
+    }
+
+    fn config_with_metric(name: &str, display: &str, unit: Option<&str>) -> Config {
+        let unit_clause = match unit {
+            Some(u) => format!(", unit = \"{u}\""),
+            None => String::new(),
+        };
+        let toml_str = format!(
+            "notes_dir = \"/tmp\"\n[metrics]\n{name} = {{ display = \"{display}\", color = \"red\"{unit_clause} }}\n"
+        );
+        toml::from_str(&toml_str).unwrap()
+    }
+
+    fn empty_db() -> rusqlite::Connection {
+        let conn = rusqlite::Connection::open_in_memory().unwrap();
+        conn.execute_batch(crate::db::CORE_SCHEMA_TEST_HOOK).unwrap();
+        conn
+    }
+
+    #[test]
+    fn resolve_builtin_weight_uses_config_unit() {
+        let toml_str = "notes_dir = \"/tmp\"\nweight_unit = \"kg\"\n";
+        let config: Config = toml::from_str(toml_str).unwrap();
+        let conn = empty_db();
+        let f = resolve_field("weight", &config, &conn).unwrap();
+        assert_eq!(f.name, "weight");
+        assert!(matches!(f.source, TrendSource::DaysColumn("weight")));
+        assert_eq!(f.unit.as_deref(), Some("kg"));
+        assert!(!f.integer_valued);
+    }
+
+    #[test]
+    fn resolve_builtin_mood_is_integer_valued() {
+        let toml_str = "notes_dir = \"/tmp\"\n";
+        let config: Config = toml::from_str(toml_str).unwrap();
+        let conn = empty_db();
+        let f = resolve_field("mood", &config, &conn).unwrap();
+        assert!(matches!(f.source, TrendSource::DaysColumn("mood")));
+        assert!(f.integer_valued);
+        assert!(f.unit.is_none());
+    }
+
+    #[test]
+    fn resolve_configured_metric_uses_config_display_and_unit() {
+        let config = config_with_metric("resting_hr", "Resting HR", Some("bpm"));
+        let conn = empty_db();
+        let f = resolve_field("resting_hr", &config, &conn).unwrap();
+        assert!(matches!(&f.source, TrendSource::Metric(n) if n == "resting_hr"));
+        assert_eq!(f.display, "Resting HR");
+        assert_eq!(f.unit.as_deref(), Some("bpm"));
+    }
+
+    #[test]
+    fn resolve_historical_metric_falls_back_to_raw_name() {
+        let toml_str = "notes_dir = \"/tmp\"\n";
+        let config: Config = toml::from_str(toml_str).unwrap();
+        let conn = empty_db();
+        // Seed a row in metrics so the soft-resolve path triggers.
+        conn.execute(
+            "INSERT INTO days (date, file_mtime) VALUES ('2026-01-01', 0.0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO metrics (date, name, value) VALUES ('2026-01-01', 'old_metric', 1.0)",
+            [],
+        )
+        .unwrap();
+        let f = resolve_field("old_metric", &config, &conn).unwrap();
+        assert!(matches!(&f.source, TrendSource::Metric(n) if n == "old_metric"));
+        assert_eq!(f.display, "old_metric");
+        assert!(f.unit.is_none());
+    }
+
+    #[test]
+    fn resolve_unknown_lists_known_fields() {
+        let config = config_with_metric("resting_hr", "Resting HR", Some("bpm"));
+        let conn = empty_db();
+        let err = resolve_field("nonsense", &config, &conn).unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("nonsense"), "got: {msg}");
+        assert!(msg.contains("weight"), "got: {msg}");
+        assert!(msg.contains("resting_hr"), "got: {msg}");
     }
 
     #[test]
