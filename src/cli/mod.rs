@@ -7,6 +7,7 @@ pub mod note_cmd;
 pub mod readme_cmd;
 pub mod sleep_cmd;
 pub mod today_cmd;
+pub mod trend_cmd;
 
 use clap::{Parser, Subcommand};
 use clap_complete::Shell;
@@ -162,6 +163,23 @@ pub enum Commands {
         /// Date in YYYY-MM-DD format (defaults to effective today)
         date: Option<String>,
         /// Print JSON instead of formatted text
+        #[arg(long)]
+        json: bool,
+    },
+    /// Print a chart of recent values for any tracked field.
+    ///
+    /// Built-in fields: weight, sleep_hours, mood, energy.
+    /// Custom fields: anything in [metrics] in your config.
+    Trend {
+        /// Field name to chart.
+        field: String,
+        /// Window length in days (default 14).
+        #[arg(default_value_t = 14)]
+        days: u32,
+        /// One-line sparkline instead of multi-row chart.
+        #[arg(long, conflicts_with = "json")]
+        compact: bool,
+        /// Print structured JSON.
         #[arg(long)]
         json: bool,
     },
