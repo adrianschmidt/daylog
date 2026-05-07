@@ -1,3 +1,10 @@
+## [1.0.4](https://github.com/adrianschmidt/vitalog/compare/v1.0.3...v1.0.4) (2026-05-07)
+
+
+### Bug Fixes
+
+* **today:** annotate weight row over/under threshold like food rows ([b5f68a9](https://github.com/adrianschmidt/vitalog/commit/b5f68a93275e081bab9a87c5a388e7b9ca60d2d3)), closes [#18](https://github.com/adrianschmidt/vitalog/issues/18)
+
 ## [1.0.3](https://github.com/adrianschmidt/vitalog/compare/v1.0.2...v1.0.3) (2026-05-07)
 
 
