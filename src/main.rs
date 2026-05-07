@@ -56,6 +56,7 @@ fn main() -> Result<()> {
             time,
         }) => cmd_bp(sys, dia, pulse, morning, evening, date, time, quiet),
         Some(Commands::Today { date, json }) => cmd_today(date, json),
+        Some(Commands::Trend { field, days, compact, json }) => cmd_trend(field, days, compact, json),
         None => cmd_run(),
     }
 }
@@ -375,4 +376,9 @@ fn cmd_bp(
 fn cmd_today(date: Option<String>, json: bool) -> Result<()> {
     let config = Config::load()?;
     vitalog::cli::today_cmd::execute(date.as_deref(), json, &config)
+}
+
+fn cmd_trend(field: String, days: u32, compact: bool, json: bool) -> Result<()> {
+    let config = Config::load()?;
+    vitalog::cli::trend_cmd::execute(&field, days, compact, json, &config)
 }
