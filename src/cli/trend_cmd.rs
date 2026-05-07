@@ -52,6 +52,9 @@ pub struct TrendData {
 }
 
 const BLOCKS: &[char] = &['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+const CHART_ROWS: usize = 8;
+const COL_WIDTH: usize = 2;
+const Y_LABEL_WIDTH: usize = 5;
 
 /// Built-in fields served by the `days` table.
 /// (name, column, integer_valued)
@@ -259,6 +262,107 @@ pub fn render_compact(data: &TrendData) -> String {
             out.push('\n');
             out.push_str(&format!("count {}\n", data.stats.count));
         }
+    }
+
+    out
+}
+
+pub fn render_chart(data: &TrendData) -> String {
+    let mut out = String::new();
+    out.push_str(&format!(
+        "{} (last {} days{})\n\n",
+        data.field.display,
+        data.days,
+        unit_clause(&data.field.unit)
+    ));
+
+    if data.stats.count == 0 {
+        out.push_str(&format!(
+            "no data for {} in the last {} days\n",
+            data.field.name, data.days
+        ));
+        return out;
+    }
+
+    let min = data.stats.min.unwrap();
+    let max = data.stats.max.unwrap();
+    let span = max - min;
+
+    let row_value = |row: usize| -> f64 {
+        if span == 0.0 {
+            min
+        } else {
+            max - (row as f64 / (CHART_ROWS - 1) as f64) * span
+        }
+    };
+    let row_for = |v: f64| -> usize {
+        if span == 0.0 {
+            CHART_ROWS / 2
+        } else {
+            let r = ((max - v) / span * (CHART_ROWS - 1) as f64).round() as usize;
+            r.min(CHART_ROWS - 1)
+        }
+    };
+
+    for r in 0..CHART_ROWS {
+        let label = if data.field.integer_valued {
+            format!("{:>width$}", row_value(r) as i64, width = Y_LABEL_WIDTH)
+        } else {
+            format!("{:>width$.1}", row_value(r), width = Y_LABEL_WIDTH)
+        };
+        out.push_str(&label);
+        out.push_str(" ┤");
+        for (_, v) in &data.points {
+            match v {
+                Some(x) if row_for(*x) == r => {
+                    out.push('●');
+                    for _ in 1..COL_WIDTH {
+                        out.push(' ');
+                    }
+                }
+                _ => {
+                    for _ in 0..COL_WIDTH {
+                        out.push(' ');
+                    }
+                }
+            }
+        }
+        out.push('\n');
+    }
+
+    // Axis line
+    out.push_str(&format!("{} └", " ".repeat(Y_LABEL_WIDTH)));
+    for _ in 0..(data.points.len() * COL_WIDTH) {
+        out.push('─');
+    }
+    out.push('\n');
+
+    // Date labels (left-aligned MM-DD on the from side, right-aligned on the to side).
+    let from_str = data.from.format("%m-%d").to_string();
+    let to_str = data.to.format("%m-%d").to_string();
+    let total_width = data.points.len() * COL_WIDTH;
+    let pad = total_width.saturating_sub(from_str.len() + to_str.len());
+    out.push_str(&format!(
+        "{} {}{}{}\n",
+        " ".repeat(Y_LABEL_WIDTH),
+        from_str,
+        " ".repeat(pad),
+        to_str
+    ));
+
+    out.push('\n');
+    out.push_str(&format!(
+        "mean: {:.1}  min: {:.1}  max: {:.1}\n",
+        data.stats.mean.unwrap(),
+        min,
+        max
+    ));
+    if let (Some(d), Some(w)) = (data.stats.slope_per_day, data.stats.slope_per_week) {
+        let (per_day, per_week) = slope_units(&data.field.unit);
+        out.push_str(&format!(
+            "linear trend: {:+.2} {}  (≈ {:+.1} {})\n",
+            d, per_day, w, per_week
+        ));
     }
 
     out
@@ -624,5 +728,78 @@ mod tests {
         let s = render_compact(&data);
         assert!(!s.contains("slope"), "got: {s}");
         assert!(s.contains("count 0"), "got: {s}");
+    }
+
+    #[test]
+    fn chart_no_data_short_circuits() {
+        let pts: Vec<(NaiveDate, Option<f64>)> = (0..3)
+            .map(|i| (d(2026, 1, (i + 1) as u32), None))
+            .collect();
+        let data = make_data(weight_field("kg"), 3, pts);
+        let s = render_chart(&data);
+        assert!(s.contains("weight (last 3 days, kg)"), "got: {s}");
+        assert!(s.contains("no data for weight in the last 3 days"), "got: {s}");
+        assert!(!s.contains("┤"), "should skip axis when empty: {s}");
+    }
+
+    #[test]
+    fn chart_renders_axis_and_dots_for_known_series() {
+        // Known fixture: 5 days, monotonic.
+        let pts = vec![
+            (d(2026, 1, 1), Some(120.0)),
+            (d(2026, 1, 2), Some(120.5)),
+            (d(2026, 1, 3), Some(121.0)),
+            (d(2026, 1, 4), Some(121.5)),
+            (d(2026, 1, 5), Some(122.0)),
+        ];
+        let data = make_data(weight_field("kg"), 5, pts);
+        let s = render_chart(&data);
+
+        // Title
+        assert!(s.contains("weight (last 5 days, kg)"), "got:\n{s}");
+        // Axis exists
+        assert!(s.contains("┤"), "got:\n{s}");
+        assert!(s.contains("└"), "got:\n{s}");
+        // 8 data rows means 8 lines containing '┤'
+        let row_count = s.matches('┤').count();
+        assert_eq!(row_count, 8, "got:\n{s}");
+        // At least one '●'
+        assert!(s.contains('●'), "got:\n{s}");
+        // Date labels MM-DD
+        assert!(s.contains("01-01"), "got:\n{s}");
+        assert!(s.contains("01-05"), "got:\n{s}");
+        // Stats
+        assert!(s.contains("mean: 121.0"), "got:\n{s}");
+        assert!(s.contains("min: 120.0"), "got:\n{s}");
+        assert!(s.contains("max: 122.0"), "got:\n{s}");
+        assert!(s.contains("linear trend: +0.50 kg/day"), "got:\n{s}");
+    }
+
+    #[test]
+    fn chart_integer_field_renders_integer_y_labels() {
+        let pts = vec![
+            (d(2026, 1, 1), Some(3.0)),
+            (d(2026, 1, 2), Some(5.0)),
+            (d(2026, 1, 3), Some(7.0)),
+        ];
+        let mood = TrendField {
+            name: "mood".to_string(),
+            source: TrendSource::DaysColumn("mood"),
+            display: "mood".to_string(),
+            unit: None,
+            integer_valued: true,
+        };
+        let data = make_data(mood, 3, pts);
+        let s = render_chart(&data);
+        // Y-axis labels should be integers — no decimal in the label band.
+        // The "axis label band" is the first 5 chars of every line containing '┤'.
+        for line in s.lines().filter(|l| l.contains('┤')) {
+            // chars before '┤'
+            let label = line.split('┤').next().unwrap();
+            assert!(!label.contains('.'), "y-label should be integer: '{label}' in:\n{s}");
+        }
+        // No unit in title
+        assert!(s.contains("mood (last 3 days)"), "got:\n{s}");
+        assert!(!s.contains("(last 3 days,"), "no unit clause: {s}");
     }
 }
