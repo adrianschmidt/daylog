@@ -368,6 +368,36 @@ pub fn render_chart(data: &TrendData) -> String {
     out
 }
 
+pub fn render_json(data: &TrendData) -> serde_json::Value {
+    let points: Vec<serde_json::Value> = data
+        .points
+        .iter()
+        .map(|(date, value)| {
+            serde_json::json!({
+                "date": date.format("%Y-%m-%d").to_string(),
+                "value": value,
+            })
+        })
+        .collect();
+    serde_json::json!({
+        "field": data.field.name,
+        "display": data.field.display,
+        "unit": data.field.unit,
+        "days": data.days,
+        "from": data.from.format("%Y-%m-%d").to_string(),
+        "to": data.to.format("%Y-%m-%d").to_string(),
+        "points": points,
+        "stats": {
+            "count": data.stats.count,
+            "mean": data.stats.mean,
+            "min": data.stats.min,
+            "max": data.stats.max,
+            "slope_per_day": data.stats.slope_per_day,
+            "slope_per_week": data.stats.slope_per_week,
+        },
+    })
+}
+
 pub fn execute(_field: &str, _days: u32, _compact: bool, _json: bool, _config: &Config) -> Result<()> {
     color_eyre::eyre::bail!("trend command not yet implemented");
 }
@@ -801,5 +831,60 @@ mod tests {
         // No unit in title
         assert!(s.contains("mood (last 3 days)"), "got:\n{s}");
         assert!(!s.contains("(last 3 days,"), "no unit clause: {s}");
+    }
+
+    #[test]
+    fn json_includes_full_window_with_nulls() {
+        let pts = vec![
+            (d(2026, 1, 1), Some(120.0)),
+            (d(2026, 1, 2), None),
+            (d(2026, 1, 3), Some(121.0)),
+        ];
+        let data = make_data(weight_field("kg"), 3, pts);
+        let v = render_json(&data);
+        assert_eq!(v["field"], "weight");
+        assert_eq!(v["display"], "weight");
+        assert_eq!(v["unit"], "kg");
+        assert_eq!(v["days"], 3);
+        assert_eq!(v["from"], "2026-01-01");
+        assert_eq!(v["to"], "2026-01-03");
+        let pts_json = v["points"].as_array().unwrap();
+        assert_eq!(pts_json.len(), 3);
+        assert_eq!(pts_json[0]["date"], "2026-01-01");
+        assert_eq!(pts_json[0]["value"], 120.0);
+        assert!(pts_json[1]["value"].is_null());
+        assert_eq!(pts_json[2]["value"], 121.0);
+        assert_eq!(v["stats"]["count"], 2);
+        assert_eq!(v["stats"]["min"], 120.0);
+        assert_eq!(v["stats"]["max"], 121.0);
+        assert!(v["stats"]["slope_per_day"].is_f64());
+    }
+
+    #[test]
+    fn json_empty_window_has_null_stats() {
+        let pts: Vec<(NaiveDate, Option<f64>)> = (0..3)
+            .map(|i| (d(2026, 1, (i + 1) as u32), None))
+            .collect();
+        let data = make_data(weight_field("kg"), 3, pts);
+        let v = render_json(&data);
+        assert_eq!(v["stats"]["count"], 0);
+        assert!(v["stats"]["mean"].is_null());
+        assert!(v["stats"]["slope_per_day"].is_null());
+        assert!(v["stats"]["slope_per_week"].is_null());
+    }
+
+    #[test]
+    fn json_unit_null_for_no_unit_field() {
+        let mood = TrendField {
+            name: "mood".to_string(),
+            source: TrendSource::DaysColumn("mood"),
+            display: "mood".to_string(),
+            unit: None,
+            integer_valued: true,
+        };
+        let pts = vec![(d(2026, 1, 1), Some(5.0))];
+        let data = make_data(mood, 1, pts);
+        let v = render_json(&data);
+        assert!(v["unit"].is_null());
     }
 }
