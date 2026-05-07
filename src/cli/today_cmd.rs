@@ -366,14 +366,21 @@ fn render_food_row(
 }
 
 /// Format a threshold inline: "1900–2200 kcal", "≥140 g", "≤65 bpm",
-/// "→ 110 kg", or combinations.
+/// "→ 110 kg", or combinations. When `target` accompanies a min/max
+/// bound, it is appended parenthetically (e.g. "≤110 kg (target 95)")
+/// so users who set both still see both in the text output.
 fn format_threshold_inline(t: &Threshold, unit: &str) -> String {
-    match (t.min, t.max, t.target) {
-        (Some(min), Some(max), _) => format!("{}–{} {unit}", trim_num(min), trim_num(max)),
-        (Some(min), None, _) => format!("≥{} {unit}", trim_num(min)),
-        (None, Some(max), _) => format!("≤{} {unit}", trim_num(max)),
-        (None, None, Some(tgt)) => format!("→ {} {unit}", trim_num(tgt)),
-        (None, None, None) => String::new(),
+    let bound = match (t.min, t.max) {
+        (Some(min), Some(max)) => format!("{}–{} {unit}", trim_num(min), trim_num(max)),
+        (Some(min), None) => format!("≥{} {unit}", trim_num(min)),
+        (None, Some(max)) => format!("≤{} {unit}", trim_num(max)),
+        (None, None) => String::new(),
+    };
+    match (bound.is_empty(), t.target) {
+        (true, Some(tgt)) => format!("→ {} {unit}", trim_num(tgt)),
+        (true, None) => String::new(),
+        (false, Some(tgt)) => format!("{bound} (target {})", trim_num(tgt)),
+        (false, None) => bound,
     }
 }
 
@@ -1006,5 +1013,55 @@ mod tests {
         assert_eq!(trim_num(121.5), "121.5");
         assert_eq!(trim_num(0.5), "0.5");
         assert_eq!(trim_num(-1.3), "-1.3");
+    }
+
+    fn th(min: Option<f64>, max: Option<f64>, target: Option<f64>) -> Threshold {
+        Threshold { min, max, target }
+    }
+
+    #[test]
+    fn format_threshold_inline_target_only_arms() {
+        assert_eq!(
+            format_threshold_inline(&th(Some(1900.0), Some(2200.0), None), "kcal"),
+            "1900–2200 kcal"
+        );
+        assert_eq!(
+            format_threshold_inline(&th(Some(140.0), None, None), "g"),
+            "≥140 g"
+        );
+        assert_eq!(
+            format_threshold_inline(&th(None, Some(110.0), None), "kg"),
+            "≤110 kg"
+        );
+        assert_eq!(
+            format_threshold_inline(&th(None, None, Some(110.0)), "kg"),
+            "→ 110 kg"
+        );
+        assert_eq!(format_threshold_inline(&th(None, None, None), "kg"), "");
+    }
+
+    #[test]
+    fn format_threshold_inline_target_with_max_appends_parenthetical() {
+        // The vitalog#19 case: weight_max + weight_target shows both.
+        assert_eq!(
+            format_threshold_inline(&th(None, Some(110.0), Some(95.0)), "kg"),
+            "≤110 kg (target 95)"
+        );
+    }
+
+    #[test]
+    fn format_threshold_inline_target_with_min_appends_parenthetical() {
+        assert_eq!(
+            format_threshold_inline(&th(Some(140.0), None, Some(175.0)), "g"),
+            "≥140 g (target 175)"
+        );
+    }
+
+    #[test]
+    fn format_threshold_inline_target_with_range_appends_parenthetical() {
+        assert_eq!(
+            format_threshold_inline(&th(Some(1900.0), Some(2200.0), Some(2000.0)), "kcal"),
+            "1900–2200 kcal (target 2000)"
+        );
     }
 }
