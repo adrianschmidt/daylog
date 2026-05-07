@@ -1,3 +1,10 @@
+## [1.0.1](https://github.com/adrianschmidt/vitalog/compare/v1.0.0...v1.0.1) (2026-05-07)
+
+
+### Bug Fixes
+
+* **preset:** rename remaining daylog references to vitalog ([cd5648a](https://github.com/adrianschmidt/vitalog/commit/cd5648afca5f7d586eb1a75fc50a9e2b96ccc9b8))
+
 # 1.0.0 (2026-05-05)
 
 
