@@ -51,6 +51,8 @@ pub struct TrendData {
     pub stats: TrendStats,
 }
 
+const BLOCKS: &[char] = &['▁', '▂', '▃', '▄', '▅', '▆', '▇', '█'];
+
 /// Built-in fields served by the `days` table.
 /// (name, column, integer_valued)
 const BUILTINS: &[(&str, &str, bool)] = &[
@@ -194,6 +196,72 @@ pub fn assemble(
         points,
         stats,
     })
+}
+
+fn unit_clause(unit: &Option<String>) -> String {
+    match unit {
+        Some(u) => format!(", {u}"),
+        None => String::new(),
+    }
+}
+
+fn slope_units(unit: &Option<String>) -> (String, String) {
+    match unit {
+        Some(u) => (format!("{u}/day"), format!("{u}/week")),
+        None => ("per day".to_string(), "per week".to_string()),
+    }
+}
+
+pub fn render_compact(data: &TrendData) -> String {
+    let mut out = String::new();
+    out.push_str(&format!(
+        "{} ({}d{}): ",
+        data.field.display,
+        data.days,
+        unit_clause(&data.field.unit)
+    ));
+
+    match (data.stats.min, data.stats.max) {
+        (Some(min), Some(max)) => {
+            let span = max - min;
+            for (_, v) in &data.points {
+                match v {
+                    None => out.push(' '),
+                    Some(x) => {
+                        let idx = if span == 0.0 {
+                            3
+                        } else {
+                            (((x - min) / span) * 7.0).round() as usize
+                        };
+                        out.push(BLOCKS[idx.min(7)]);
+                    }
+                }
+            }
+            out.push('\n');
+            out.push_str(&format!(
+                "mean {:.1}  min {:.1}  max {:.1}\n",
+                data.stats.mean.unwrap(),
+                min,
+                max
+            ));
+            if let (Some(d), Some(w)) = (data.stats.slope_per_day, data.stats.slope_per_week) {
+                let (per_day, per_week) = slope_units(&data.field.unit);
+                out.push_str(&format!(
+                    "slope {:+.2} {}  (≈ {:+.1} {})\n",
+                    d, per_day, w, per_week
+                ));
+            }
+        }
+        _ => {
+            for _ in &data.points {
+                out.push(' ');
+            }
+            out.push('\n');
+            out.push_str(&format!("count {}\n", data.stats.count));
+        }
+    }
+
+    out
 }
 
 pub fn execute(_field: &str, _days: u32, _compact: bool, _json: bool, _config: &Config) -> Result<()> {
@@ -499,5 +567,62 @@ mod tests {
         assert_eq!(data.points[2].1, None); // 2026-01-03 has no row
         assert_eq!(data.stats.count, 2);
         assert_eq!(data.field.unit.as_deref(), Some("kg"));
+    }
+
+    fn make_data(field: TrendField, days: u32, points: Vec<(NaiveDate, Option<f64>)>) -> TrendData {
+        let from = points.first().map(|(d, _)| *d).unwrap_or(d(2026, 1, 1));
+        let to = points.last().map(|(d, _)| *d).unwrap_or(from);
+        let stats = compute_stats(&points);
+        TrendData { field, days, from, to, points, stats }
+    }
+
+    #[test]
+    fn compact_renders_blocks_and_stats() {
+        let pts: Vec<_> = (0..7)
+            .map(|i| (d(2026, 1, (i + 1) as u32), Some(120.0 + i as f64 * 0.5)))
+            .collect();
+        let data = make_data(weight_field("kg"), 7, pts);
+        let s = render_compact(&data);
+        assert!(s.starts_with("weight (7d, kg): "), "got: {s}");
+        // 7 points, monotonic increase → blocks span low to high
+        assert!(s.contains('▁'), "got: {s}");
+        assert!(s.contains('█'), "got: {s}");
+        assert!(s.contains("mean 121.5"), "got: {s}");
+        assert!(s.contains("min 120.0"), "got: {s}");
+        assert!(s.contains("max 123.0"), "got: {s}");
+        assert!(s.contains("slope +0.50 kg/day"), "got: {s}");
+        assert!(s.contains("≈ +3.5 kg/week"), "got: {s}");
+    }
+
+    #[test]
+    fn compact_all_equal_uses_mid_block() {
+        let pts: Vec<_> = (0..3)
+            .map(|i| (d(2026, 1, (i + 1) as u32), Some(120.0)))
+            .collect();
+        let data = make_data(weight_field("kg"), 3, pts);
+        let s = render_compact(&data);
+        assert!(s.contains("▄▄▄"), "expected three mid blocks, got: {s}");
+    }
+
+    #[test]
+    fn compact_gap_renders_space() {
+        let pts = vec![
+            (d(2026, 1, 1), Some(120.0)),
+            (d(2026, 1, 2), None),
+            (d(2026, 1, 3), Some(121.0)),
+        ];
+        let data = make_data(weight_field("kg"), 3, pts);
+        let s = render_compact(&data);
+        // Expect ' ' between two blocks
+        assert!(s.contains("▁ █") || s.contains("▄ ▄"), "got: {s}");
+    }
+
+    #[test]
+    fn compact_no_data_omits_slope_line() {
+        let pts = vec![(d(2026, 1, 1), None), (d(2026, 1, 2), None)];
+        let data = make_data(weight_field("kg"), 2, pts);
+        let s = render_compact(&data);
+        assert!(!s.contains("slope"), "got: {s}");
+        assert!(s.contains("count 0"), "got: {s}");
     }
 }
