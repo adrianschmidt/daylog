@@ -2,7 +2,7 @@
 
 use std::collections::HashMap;
 
-use chrono::NaiveDate;
+use chrono::{Duration, NaiveDate};
 use color_eyre::eyre::{eyre, Result};
 use rusqlite::{Connection, OptionalExtension};
 
@@ -39,6 +39,16 @@ pub struct TrendStats {
     pub slope_per_day: Option<f64>,
     /// `slope_per_day * 7`.
     pub slope_per_week: Option<f64>,
+}
+
+#[derive(Debug, Clone)]
+pub struct TrendData {
+    pub field: TrendField,
+    pub days: u32,
+    pub from: NaiveDate,
+    pub to: NaiveDate,
+    pub points: Vec<(NaiveDate, Option<f64>)>,
+    pub stats: TrendStats,
 }
 
 /// Built-in fields served by the `days` table.
@@ -158,6 +168,32 @@ pub fn build_window(
         day = day.succ_opt().expect("date overflow inside trend window");
     }
     Ok(out)
+}
+
+/// Pure(ish) data assembly: resolves the field, queries the DB, computes
+/// stats. The caller is responsible for sync-on-run; this fn just reads.
+/// `today` is parameterized for testability — production callers pass
+/// `config.effective_today_date()`.
+pub fn assemble(
+    field: &str,
+    days: u32,
+    config: &Config,
+    conn: &Connection,
+    today: NaiveDate,
+) -> Result<TrendData> {
+    let trend_field = resolve_field(field, config, conn)?;
+    let to = today;
+    let from = to - Duration::days(days as i64 - 1);
+    let points = build_window(&trend_field, conn, from, to)?;
+    let stats = compute_stats(&points);
+    Ok(TrendData {
+        field: trend_field,
+        days,
+        from,
+        to,
+        points,
+        stats,
+    })
 }
 
 pub fn execute(_field: &str, _days: u32, _compact: bool, _json: bool, _config: &Config) -> Result<()> {
@@ -443,5 +479,25 @@ mod tests {
         let pts = build_window(&weight_field("kg"), &conn, d(2026, 1, 1), d(2026, 1, 3)).unwrap();
         assert_eq!(pts.len(), 3);
         assert!(pts.iter().all(|(_, v)| v.is_none()));
+    }
+
+    #[test]
+    fn assemble_smoke() {
+        let toml_str = "notes_dir = \"/tmp\"\nweight_unit = \"kg\"\n";
+        let config: Config = toml::from_str(toml_str).unwrap();
+        let conn = empty_db();
+        seed_day(&conn, "2026-01-01", Some(120.0));
+        seed_day(&conn, "2026-01-02", Some(120.5));
+
+        let to = d(2026, 1, 3);
+        let data = assemble("weight", 3, &config, &conn, to).unwrap();
+
+        assert_eq!(data.days, 3);
+        assert_eq!(data.from, d(2026, 1, 1));
+        assert_eq!(data.to, d(2026, 1, 3));
+        assert_eq!(data.points.len(), 3);
+        assert_eq!(data.points[2].1, None); // 2026-01-03 has no row
+        assert_eq!(data.stats.count, 2);
+        assert_eq!(data.field.unit.as_deref(), Some("kg"));
     }
 }
