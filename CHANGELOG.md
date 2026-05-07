@@ -1,3 +1,24 @@
+# [1.1.0](https://github.com/adrianschmidt/vitalog/compare/v1.0.4...v1.1.0) (2026-05-07)
+
+
+### Bug Fixes
+
+* **trend:** assert OLS denominator invariant; tighten empty-stats test ([#9](https://github.com/adrianschmidt/vitalog/issues/9)) ([d45761e](https://github.com/adrianschmidt/vitalog/commit/d45761ee6ed396903a20080dfcacd59151ed28ad))
+* **trend:** match today's sync error policy; ensure date labels separated ([#9](https://github.com/adrianschmidt/vitalog/issues/9)) ([faaa7bb](https://github.com/adrianschmidt/vitalog/commit/faaa7bb468d6d411b0a24a2ca541a721ff6cb616))
+
+
+### Features
+
+* **trend:** add types and compute_stats with OLS slope ([#9](https://github.com/adrianschmidt/vitalog/issues/9)) ([fd46ae1](https://github.com/adrianschmidt/vitalog/commit/fd46ae169792003ba633364a5ff8a0659b507122))
+* **trend:** build_window expands DB rows to full date range ([#9](https://github.com/adrianschmidt/vitalog/issues/9)) ([157ddac](https://github.com/adrianschmidt/vitalog/commit/157ddac515bd8ba66fd58676f3c9bb562f440730))
+* **trend:** render_chart with multi-row ASCII output ([#9](https://github.com/adrianschmidt/vitalog/issues/9)) ([65f011c](https://github.com/adrianschmidt/vitalog/commit/65f011c5f1b03f80be0952ad3ed1f49309e89bbd))
+* **trend:** render_compact with sparkline blocks ([#9](https://github.com/adrianschmidt/vitalog/issues/9)) ([fff7d4c](https://github.com/adrianschmidt/vitalog/commit/fff7d4c22e9ae452bd319ce418576b214f666484))
+* **trend:** render_json with full window and stats ([#9](https://github.com/adrianschmidt/vitalog/issues/9)) ([c9162a8](https://github.com/adrianschmidt/vitalog/commit/c9162a8193d45896edd2ee433acaa98df4f80495))
+* **trend:** resolve_field with builtins and metric fallback ([#9](https://github.com/adrianschmidt/vitalog/issues/9)) ([598ca96](https://github.com/adrianschmidt/vitalog/commit/598ca9637429ef0fae388c170da2020a7c2fe412))
+* **trend:** scaffold CLI subcommand and dispatch ([#9](https://github.com/adrianschmidt/vitalog/issues/9)) ([487cdc6](https://github.com/adrianschmidt/vitalog/commit/487cdc69c80b0bc889c82dcdc7154d07292ef9cf))
+* **trend:** TrendData + assemble entry point ([#9](https://github.com/adrianschmidt/vitalog/issues/9)) ([f2d8f0e](https://github.com/adrianschmidt/vitalog/commit/f2d8f0eebffc462480e295816c3adb715529fbd8))
+* **trend:** wire execute end-to-end with sync-on-run ([#9](https://github.com/adrianschmidt/vitalog/issues/9)) ([1f9f419](https://github.com/adrianschmidt/vitalog/commit/1f9f4193a22d104d2f2607f14d42b99707323d64))
+
 ## [1.0.4](https://github.com/adrianschmidt/vitalog/compare/v1.0.3...v1.0.4) (2026-05-07)
 
 
