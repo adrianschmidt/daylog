@@ -231,3 +231,64 @@ target = "la_min"
     // reminder_warnings is always an array
     assert!(v["reminder_warnings"].is_array(), "got:\n{v}");
 }
+
+#[test]
+fn today_text_silent_before_gate_visible_inside_window() {
+    let (dir, config) = setup_with_reminders(
+        r#"
+[reminders.brush_evening]
+display = "Brush teeth (evening)"
+interval_days = 1
+watch = "metric"
+target = "la_min"
+not_before = "18:00"
+not_after = "23:00"
+"#,
+    );
+
+    // Logged 3 days ago — data-overdue.
+    write_note(
+        dir.path(),
+        "2026-05-09",
+        "---\ndate: 2026-05-09\nla_min: 1\n---\n\n## Food\n",
+    );
+
+    let registry = modules::build_registry(&config);
+    let conn = db::open_rw(&config.db_path()).unwrap();
+    db::init_db(&conn, &registry).unwrap();
+    modules::validate_module_tables(&registry).unwrap();
+    vitalog::materializer::sync_all(&conn, &config.notes_dir_path(), &config, &registry).unwrap();
+
+    let date = NaiveDate::from_ymd_opt(2026, 5, 12).unwrap();
+    let reminders = load_reminders(&config).unwrap();
+
+    // Before window — 10:00 wall-clock.
+    let eval_before = evaluate(
+        &conn,
+        date,
+        NaiveTime::from_hms_opt(10, 0, 0).unwrap(),
+        &reminders,
+        &config,
+    )
+    .unwrap();
+    let block_before = render_reminders_block(&eval_before.reminders, false);
+    assert!(
+        block_before.is_empty(),
+        "block should be silent before gate; got:\n{block_before}"
+    );
+
+    // Inside window — 19:00 wall-clock.
+    let eval_in = evaluate(
+        &conn,
+        date,
+        NaiveTime::from_hms_opt(19, 0, 0).unwrap(),
+        &reminders,
+        &config,
+    )
+    .unwrap();
+    let block_in = render_reminders_block(&eval_in.reminders, false);
+    assert!(
+        block_in.contains("Brush teeth (evening)"),
+        "block should show inside gate; got:\n{block_in}"
+    );
+}
