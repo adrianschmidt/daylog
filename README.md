@@ -72,6 +72,45 @@ Training tab shows it. Trends tab shows 1RM progression. Zero code.
 
 For domains needing custom tables and visualization. The climbing module is the reference implementation — one directory, one trait, one line in the registry.
 
+## Reminders
+
+Habits with rhythms ("do X every other day") don't fit phone alarms — skip a day and the alarms drift out of phase. Vitalog can watch the data you already log and remind you at the top of `vitalog today` when something hasn't been done recently.
+
+```toml
+[reminders.lactic_acid]
+display       = "Lactic acid training"
+interval_days = 2                                       # every other day
+watch         = "metric"
+target        = "la_min"
+
+[reminders.zone2]
+display       = "Zone 2 cardio"
+interval_days = 3
+watch         = "session"
+target        = { field = "zone2_min", min_value = 1 }
+
+[reminders.deadlifts]
+display       = "Heavy deadlifts"
+interval_days = 7
+watch         = "lift"
+target        = { exercise = "deadlift", min_weight = 200 }
+
+[reminders.weigh_in]
+display       = "Daily weigh-in"
+interval_days = 1
+watch         = "day_field"
+target        = "weight"
+```
+
+Each reminder picks one of four `watch` kinds:
+
+- **`metric`** — a custom metric from `[metrics]`. By default `value > 0` counts as "logged"; set `count_zero_as_logged = true` if 0 is a real reading you want to count.
+- **`session`** — a row in the training-sessions table. Text columns (`type`, `block`, `vo2_intervals`) use `equals = "..."`; numeric columns (`duration`, `rpe`, `zone2_min`, `hr_avg`, `week`) use `min_value = N`.
+- **`lift`** — a row in `lift_sets`. Requires `exercise`; optional `min_weight` (lbs) and `min_reps` narrow the match.
+- **`day_field`** — one of `weight`, `sleep_hours`, `mood`, `energy`, `sleep_start`, `sleep_end`. Any non-null value counts as "logged".
+
+A reminder fires when the most recent matching date is either absent or at least `interval_days` calendar days before today (respecting `day_start_hour`). The block is silent when nothing is due. Both `vitalog today --json` and `vitalog status` always include a `reminders` array (every configured reminder, due or not) plus a `reminder_warnings` sibling — handy for piping into a notification script.
+
 ## CLI
 
 ```bash
