@@ -31,7 +31,7 @@ pub fn execute(config: &Config) -> Result<()> {
     Ok(())
 }
 
-pub(crate) fn assemble_status(
+pub fn assemble_status(
     conn: &rusqlite::Connection,
     config: &Config,
     registry: &[Box<dyn modules::Module>],
