@@ -50,6 +50,8 @@ src/
   body.rs              Line-oriented `## Section` primitives (ensure_section,
                        append_line_to_section). Sibling to frontmatter.rs.
                        Pure functions over &str.
+  reminders.rs         Reminder definitions, evaluator, soft warnings; reads
+                       existing tables only.
   cli/
     mod.rs             Clap CLI definition
     bp_cmd.rs          `vitalog bp` — slot dispatch + YAML scalars + Vitals line
@@ -60,7 +62,8 @@ src/
     note_cmd.rs        `vitalog note` — alias resolution + body append
     readme_cmd.rs      `vitalog readme` — print embedded README.md to stdout
     sleep_cmd.rs       `vitalog sleep-start` / `sleep-end` — bedtime tracking
-    today_cmd.rs       `vitalog today` — compact daily summary (food, weight, sleep, BP)
+    status_cmd.rs      `vitalog status` — JSON output, sync-on-run, reminders array.
+    today_cmd.rs       `vitalog today` — compact daily summary (food, weight, sleep, BP); loads & renders [reminders] block above the summary
     trend_cmd.rs       `vitalog trend` — sparkline / chart / JSON for a field
   modules/
     mod.rs             Module trait + registry + InsertOp + YamlPath + parse_color

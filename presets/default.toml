@@ -43,3 +43,48 @@ rdl = { display = "RDL", color = "red" }
 # moonboard = 3
 # kilter = 1
 # tension = 1
+
+# [reminders]
+# Smart reminders that fire when something you've configured hasn't been
+# logged recently. Shown at the top of `vitalog today` and in the JSON of
+# both `today` and `status`.
+#
+# Each reminder picks one of four "watch" sources:
+#   - "metric"    — a custom metric in [metrics] above
+#   - "session"   — a row in the sessions table (any training session)
+#   - "lift"      — a row in lift_sets (a specific exercise)
+#   - "day_field" — a built-in days column: weight, sleep_hours, mood,
+#                   energy, sleep_start, sleep_end
+#
+# `interval_days = N` means "fire if no matching row in the last N
+# calendar days" — so 2 = every other day, 1 = daily, 7 = weekly.
+#
+# [reminders.lactic_acid]
+# display       = "Lactic acid training"
+# interval_days = 2
+# watch         = "metric"
+# target        = "la_min"            # log via: vitalog log metric la_min 15
+#
+# [reminders.zone2]
+# display       = "Zone 2 cardio"
+# interval_days = 3
+# watch         = "session"
+# target        = { field = "zone2_min", min_value = 1 }
+#
+# [reminders.vo2_block]
+# display       = "VO2max intervals"
+# interval_days = 7
+# watch         = "session"
+# target        = { field = "type", equals = "vo2_max" }
+#
+# [reminders.deadlifts]
+# display       = "Heavy deadlifts"
+# interval_days = 7
+# watch         = "lift"
+# target        = { exercise = "deadlift", min_weight = 200 }
+#
+# [reminders.weigh_in]
+# display       = "Daily weigh-in"
+# interval_days = 1
+# watch         = "day_field"
+# target        = "weight"
