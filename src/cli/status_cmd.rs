@@ -74,7 +74,13 @@ pub fn assemble_status(
     let eval = if reminders_defs.is_empty() {
         crate::reminders::EvaluationResult::default()
     } else {
-        crate::reminders::evaluate(conn, config.effective_today_date(), &reminders_defs, config)?
+        crate::reminders::evaluate(
+            conn,
+            config.effective_today_date(),
+            chrono::Local::now().time(),
+            &reminders_defs,
+            config,
+        )?
     };
     let (rs, warns) = crate::reminders::to_json(&eval.reminders, &eval.warnings);
     output["reminders"] = rs;

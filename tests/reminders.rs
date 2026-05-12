@@ -1,6 +1,6 @@
 //! End-to-end tests for the [reminders] feature.
 
-use chrono::NaiveDate;
+use chrono::{NaiveDate, NaiveTime};
 use vitalog::cli::status_cmd;
 use vitalog::cli::today_cmd::{
     assemble, render_json_with_reminders, render_reminders_block, render_text,
@@ -66,7 +66,14 @@ target = "la_min"
     let summary = assemble(date, &config, &conn).unwrap();
     let goals = load_goals(&config.notes_dir_path()).unwrap();
     let reminders = load_reminders(&config).unwrap();
-    let eval = evaluate(&conn, date, &reminders, &config).unwrap();
+    let eval = evaluate(
+        &conn,
+        date,
+        NaiveTime::from_hms_opt(12, 0, 0).unwrap(),
+        &reminders,
+        &config,
+    )
+    .unwrap();
 
     let block = render_reminders_block(&eval.reminders, false);
     let body = render_text(&summary, &goals, false);
@@ -110,7 +117,14 @@ target = "la_min"
 
     let date = NaiveDate::from_ymd_opt(2026, 5, 12).unwrap();
     let reminders = load_reminders(&config).unwrap();
-    let eval = evaluate(&conn, date, &reminders, &config).unwrap();
+    let eval = evaluate(
+        &conn,
+        date,
+        NaiveTime::from_hms_opt(12, 0, 0).unwrap(),
+        &reminders,
+        &config,
+    )
+    .unwrap();
 
     let block = render_reminders_block(&eval.reminders, false);
     assert!(block.is_empty(), "expected empty block, got:\n{block:?}");
@@ -151,7 +165,14 @@ target = "weight"
     let summary = assemble(date, &config, &conn).unwrap();
     let goals = load_goals(&config.notes_dir_path()).unwrap();
     let reminders = load_reminders(&config).unwrap();
-    let eval = evaluate(&conn, date, &reminders, &config).unwrap();
+    let eval = evaluate(
+        &conn,
+        date,
+        NaiveTime::from_hms_opt(12, 0, 0).unwrap(),
+        &reminders,
+        &config,
+    )
+    .unwrap();
 
     let v = render_json_with_reminders(&summary, &goals, &eval.reminders, &eval.warnings);
     let arr = v["reminders"].as_array().unwrap();
