@@ -93,12 +93,14 @@ pub fn execute(date: Option<&str>, json: bool, config: &Config) -> Result<()> {
         let conn = crate::db::open_ro(&config.db_path())?;
         crate::reminders::evaluate(&conn, date, &reminders_defs, config)?
     };
-    for w in &reminder_eval.warnings {
-        summary.goals_warnings.push(w.clone());
-    }
 
     if json {
-        let v = render_json(&summary, &goals);
+        let v = render_json_with_reminders(
+            &summary,
+            &goals,
+            &reminder_eval.reminders,
+            &reminder_eval.warnings,
+        );
         println!("{}", serde_json::to_string_pretty(&v)?);
     } else {
         let color = std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none();
@@ -107,6 +109,10 @@ pub fn execute(date: Option<&str>, json: bool, config: &Config) -> Result<()> {
             render_reminders_block(&reminder_eval.reminders, color)
         );
         print!("{}", render_text(&summary, &goals, color));
+        for w in &reminder_eval.warnings {
+            let line = paint(color, DIM, &format!("({w})"));
+            println!("{line}");
+        }
     }
     Ok(())
 }
@@ -690,6 +696,43 @@ pub fn render_json(summary: &DaySummary, goals: &Goals) -> serde_json::Value {
         "goals_present": goals.present,
         "warnings": warnings,
     })
+}
+
+/// Like `render_json` but also embeds the `reminders` array and a
+/// `reminder_warnings` sibling. The existing `warnings` array is left
+/// untouched — reminder warnings stay in their own stream so JSON
+/// consumers can route them separately (per spec).
+pub fn render_json_with_reminders(
+    summary: &DaySummary,
+    goals: &Goals,
+    reminders: &[crate::reminders::EvaluatedReminder],
+    reminder_warnings: &[String],
+) -> serde_json::Value {
+    let mut v = render_json(summary, goals);
+
+    let rs_json: Vec<serde_json::Value> = reminders
+        .iter()
+        .map(|r| {
+            serde_json::json!({
+                "id": r.id,
+                "display": r.display,
+                "interval_days": r.interval_days,
+                "last_done": r.last_done.map(|d| d.format("%Y-%m-%d").to_string()),
+                "days_since": r.days_since,
+                "due": r.due,
+            })
+        })
+        .collect();
+    v["reminders"] = serde_json::Value::Array(rs_json);
+
+    let warns_json: Vec<serde_json::Value> = reminder_warnings
+        .iter()
+        .cloned()
+        .map(serde_json::Value::String)
+        .collect();
+    v["reminder_warnings"] = serde_json::Value::Array(warns_json);
+
+    v
 }
 
 fn metric_obj(
@@ -1399,6 +1442,87 @@ mod tests {
         )];
         let block = render_reminders_block(&rs, false);
         assert!(!block.contains("\x1b["), "got:\n{block:?}");
+    }
+
+    #[test]
+    fn render_json_includes_empty_reminders_when_none_configured() {
+        let s = fixture_summary();
+        let g = fixture_goals();
+        let v = render_json_with_reminders(&s, &g, &[], &[]);
+        assert!(v["reminders"].is_array(), "got:\n{v}");
+        assert_eq!(v["reminders"].as_array().unwrap().len(), 0);
+        assert!(v["reminder_warnings"].is_array(), "got:\n{v}");
+        assert_eq!(v["reminder_warnings"].as_array().unwrap().len(), 0);
+    }
+
+    #[test]
+    fn render_json_lists_all_reminders_including_not_due() {
+        let s = fixture_summary();
+        let g = fixture_goals();
+        let rs = vec![
+            evald(
+                "lactic_acid",
+                "Lactic acid training",
+                Some(3),
+                Some(NaiveDate::from_ymd_opt(2026, 5, 9).unwrap()),
+                true,
+                2,
+            ),
+            evald(
+                "weigh_in",
+                "Daily weigh-in",
+                Some(0),
+                Some(NaiveDate::from_ymd_opt(2026, 5, 12).unwrap()),
+                false,
+                1,
+            ),
+        ];
+        let v = render_json_with_reminders(&s, &g, &rs, &[]);
+        let arr = v["reminders"].as_array().unwrap();
+        assert_eq!(arr.len(), 2);
+        let la = &arr[0];
+        assert_eq!(la["id"], "lactic_acid");
+        assert_eq!(la["display"], "Lactic acid training");
+        assert_eq!(la["interval_days"], 2);
+        assert_eq!(la["last_done"], "2026-05-09");
+        assert_eq!(la["days_since"], 3);
+        assert_eq!(la["due"], true);
+
+        let weigh = &arr[1];
+        assert_eq!(weigh["id"], "weigh_in");
+        assert_eq!(weigh["due"], false);
+        assert_eq!(weigh["days_since"], 0);
+    }
+
+    #[test]
+    fn render_json_reminder_with_no_last_done_uses_null() {
+        let s = fixture_summary();
+        let g = fixture_goals();
+        let rs = vec![evald("never", "Never logged", None, None, true, 1)];
+        let v = render_json_with_reminders(&s, &g, &rs, &[]);
+        let r = &v["reminders"][0];
+        assert!(r["last_done"].is_null());
+        assert!(r["days_since"].is_null());
+    }
+
+    #[test]
+    fn render_json_includes_reminder_warnings() {
+        let s = fixture_summary();
+        let g = fixture_goals();
+        let v = render_json_with_reminders(
+            &s,
+            &g,
+            &[],
+            &["reminder `x`: target metric `y` is not declared in [metrics]".to_string()],
+        );
+        let w = v["reminder_warnings"].as_array().unwrap();
+        assert_eq!(w.len(), 1);
+        assert!(w[0].as_str().unwrap().contains("target metric"));
+        // The regular `warnings` array stays untouched.
+        let regular = v["warnings"].as_array().unwrap();
+        assert!(regular
+            .iter()
+            .all(|x| !x.as_str().unwrap().contains("target metric")));
     }
 
     #[test]
