@@ -710,27 +710,9 @@ pub fn render_json_with_reminders(
 ) -> serde_json::Value {
     let mut v = render_json(summary, goals);
 
-    let rs_json: Vec<serde_json::Value> = reminders
-        .iter()
-        .map(|r| {
-            serde_json::json!({
-                "id": r.id,
-                "display": r.display,
-                "interval_days": r.interval_days,
-                "last_done": r.last_done.map(|d| d.format("%Y-%m-%d").to_string()),
-                "days_since": r.days_since,
-                "due": r.due,
-            })
-        })
-        .collect();
-    v["reminders"] = serde_json::Value::Array(rs_json);
-
-    let warns_json: Vec<serde_json::Value> = reminder_warnings
-        .iter()
-        .cloned()
-        .map(serde_json::Value::String)
-        .collect();
-    v["reminder_warnings"] = serde_json::Value::Array(warns_json);
+    let (rs, warns) = crate::reminders::to_json(reminders, reminder_warnings);
+    v["reminders"] = rs;
+    v["reminder_warnings"] = warns;
 
     v
 }

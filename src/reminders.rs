@@ -489,6 +489,37 @@ fn query_last_done(conn: &Connection, watch: &WatchSource) -> Result<Option<Naiv
     Ok(date_str.and_then(|s| NaiveDate::parse_from_str(&s, "%Y-%m-%d").ok()))
 }
 
+/// Build the JSON values for the `reminders` and `reminder_warnings` keys
+/// emitted by `vitalog today --json` and `vitalog status`. Lifted here so
+/// both surfaces agree on the per-reminder schema as fields evolve.
+pub fn to_json(
+    reminders: &[EvaluatedReminder],
+    warnings: &[String],
+) -> (serde_json::Value, serde_json::Value) {
+    let rs: Vec<serde_json::Value> = reminders
+        .iter()
+        .map(|r| {
+            serde_json::json!({
+                "id": r.id,
+                "display": r.display,
+                "interval_days": r.interval_days,
+                "last_done": r.last_done.map(|d| d.format("%Y-%m-%d").to_string()),
+                "days_since": r.days_since,
+                "due": r.due,
+            })
+        })
+        .collect();
+    let warns: Vec<serde_json::Value> = warnings
+        .iter()
+        .cloned()
+        .map(serde_json::Value::String)
+        .collect();
+    (
+        serde_json::Value::Array(rs),
+        serde_json::Value::Array(warns),
+    )
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

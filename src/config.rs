@@ -223,6 +223,12 @@ impl Config {
             ))
             .suggestion("Set day_start_hour to a value between 0 and 23 in your config.toml.");
         }
+        // Surface [reminders] structural errors fail-fast on every command,
+        // not just `today` and `status`. load_reminders runs the same
+        // validation that today/status would otherwise do at runtime; we
+        // discard the Vec — the result is recomputed when those commands
+        // actually need the parsed reminders.
+        crate::reminders::load_reminders(self)?;
         Ok(())
     }
 
