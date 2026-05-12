@@ -178,55 +178,7 @@ fn cmd_log(field: &str, value: &[String]) -> Result<()> {
 
 fn cmd_status() -> Result<()> {
     let config = Config::load()?;
-    let registry = modules::build_registry(&config);
-    let db_path = config.db_path();
-
-    if !db_path.exists() {
-        color_eyre::eyre::bail!(
-            "Database not found at {}. Run `vitalog init` or `vitalog sync` first.",
-            db_path.display()
-        );
-    }
-
-    let conn = db::open_ro(&db_path)?;
-    let today = config.effective_today();
-
-    let mut output = serde_json::json!({
-        "effective_date": &today,
-        "day_start_hour": config.day_start_hour,
-        "weight_unit": config.weight_unit.to_string(),
-    });
-    if let Some(day_data) = db::load_today(&conn, &today)? {
-        output["today"] = day_data;
-    }
-
-    // Collect module status
-    for module in &registry {
-        if let Some(status) = module.status_json(&conn, &config) {
-            output[module.id()] = status;
-        }
-    }
-
-    // Surface pending sleep state so scripts and `--json` consumers can see
-    // a sleep-in-progress (between `vitalog sleep-start` and `vitalog sleep-end`).
-    let pending = vitalog::state::load(&config.notes_dir_path());
-    if let Some(p) = pending.sleep_start {
-        output["pending"] = serde_json::json!({
-            "sleep_start": {
-                "bedtime": vitalog::time::format_time(p.bedtime, config.time_format),
-                "recorded_at": p.recorded_at.to_rfc3339(),
-            }
-        });
-    }
-
-    let nutrition = db::nutrition_status(&conn)?;
-    output["nutrition_db"] = serde_json::json!({
-        "foods_count": nutrition.foods_count,
-        "last_synced": nutrition.last_synced,
-    });
-
-    println!("{}", serde_json::to_string_pretty(&output)?);
-    Ok(())
+    vitalog::cli::status_cmd::execute(&config)
 }
 
 fn cmd_sync() -> Result<()> {

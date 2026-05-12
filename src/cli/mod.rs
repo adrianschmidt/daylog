@@ -6,6 +6,7 @@ pub mod migrate_cmd;
 pub mod note_cmd;
 pub mod readme_cmd;
 pub mod sleep_cmd;
+pub mod status_cmd;
 pub mod today_cmd;
 pub mod trend_cmd;
 
