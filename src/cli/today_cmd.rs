@@ -91,7 +91,13 @@ pub fn execute(date: Option<&str>, json: bool, config: &Config) -> Result<()> {
         crate::reminders::EvaluationResult::default()
     } else {
         let conn = crate::db::open_ro(&config.db_path())?;
-        crate::reminders::evaluate(&conn, date, &reminders_defs, config)?
+        crate::reminders::evaluate(
+            &conn,
+            date,
+            chrono::Local::now().time(),
+            &reminders_defs,
+            config,
+        )?
     };
 
     if json {
@@ -1544,7 +1550,14 @@ target = "la_min"
         let goals = crate::goals::load_goals(&config.notes_dir_path()).unwrap();
         let summary = assemble(date, &config, &conn).unwrap();
         let reminders = crate::reminders::load_reminders(&config).unwrap();
-        let eval = crate::reminders::evaluate(&conn, date, &reminders, &config).unwrap();
+        let eval = crate::reminders::evaluate(
+            &conn,
+            date,
+            chrono::NaiveTime::from_hms_opt(12, 0, 0).unwrap(),
+            &reminders,
+            &config,
+        )
+        .unwrap();
 
         let mut out = render_reminders_block(&eval.reminders, false);
         out.push_str(&render_text(&summary, &goals, false));

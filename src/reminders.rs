@@ -433,10 +433,6 @@ fn offset_minutes(t: NaiveTime, day_start_hour: u8) -> u32 {
 /// `not_before` and `not_after`. Either bound being `None` means "no
 /// limit on that side". Uses `offset_minutes` so non-zero `day_start_hour`
 /// values correctly attribute wall-clock times to the right effective day.
-//
-// `#[allow(dead_code)]` because the production caller (in `evaluate`)
-// lands in a follow-up commit; tests below exercise this helper.
-#[allow(dead_code)]
 fn within_time_window(
     now: NaiveTime,
     not_before: Option<NaiveTime>,
@@ -450,11 +446,14 @@ fn within_time_window(
 }
 
 /// Evaluate reminders against the current DB state, computing `last_done`
-/// per watched source. `today` is the effective today date (callers
-/// should pass `config.effective_today_date()`).
+/// per watched source and applying the per-reminder time gate. `today` is
+/// the effective today date (callers should pass `config.effective_today_date()`);
+/// `now` is the current wall-clock time (callers should pass
+/// `chrono::Local::now().time()`).
 pub fn evaluate(
     conn: &Connection,
     today: NaiveDate,
+    now: NaiveTime,
     reminders: &[Reminder],
     config: &Config,
 ) -> Result<EvaluationResult> {
@@ -471,10 +470,12 @@ pub fn evaluate(
             }
         }
         let days_since = last_done.map(|d| (today - d).num_days());
-        let due = match days_since {
+        let data_overdue = match days_since {
             None => true,
             Some(n) => n >= r.interval_days as i64,
         };
+        let in_window = within_time_window(now, r.not_before, r.not_after, config.day_start_hour);
+        let due = data_overdue && in_window;
         out.push(EvaluatedReminder {
             id: r.id.clone(),
             display: r.display.clone(),
@@ -482,8 +483,8 @@ pub fn evaluate(
             last_done,
             days_since,
             due,
-            not_before: None,
-            not_after: None,
+            not_before: r.not_before,
+            not_after: r.not_after,
         });
     }
     Ok(EvaluationResult {
@@ -998,6 +999,7 @@ la_min = { display = "LA", color = "red" }
         let result = evaluate(
             &conn,
             today,
+            noon(),
             &[metric_reminder("la", 2, "la_min")],
             &empty_config(),
         )
@@ -1017,6 +1019,7 @@ la_min = { display = "LA", color = "red" }
         let result = evaluate(
             &conn,
             today,
+            noon(),
             &[metric_reminder("la", 2, "la_min")],
             &empty_config(),
         )
@@ -1037,6 +1040,7 @@ la_min = { display = "LA", color = "red" }
         let result = evaluate(
             &conn,
             today,
+            noon(),
             &[metric_reminder("la", 2, "la_min")],
             &empty_config(),
         )
@@ -1059,6 +1063,7 @@ la_min = { display = "LA", color = "red" }
         let result = evaluate(
             &conn,
             today,
+            noon(),
             &[metric_reminder("la", 2, "la_min")],
             &empty_config(),
         )
@@ -1076,6 +1081,7 @@ la_min = { display = "LA", color = "red" }
         let result = evaluate(
             &conn,
             today,
+            noon(),
             &[metric_reminder("la", 2, "la_min")],
             &empty_config(),
         )
@@ -1100,7 +1106,7 @@ la_min = { display = "LA", color = "red" }
             not_before: None,
             not_after: None,
         };
-        let result = evaluate(&conn, today, &[reminder], &empty_config()).unwrap();
+        let result = evaluate(&conn, today, noon(), &[reminder], &empty_config()).unwrap();
         assert_eq!(result.reminders[0].last_done, Some(today));
         assert!(!result.reminders[0].due);
     }
@@ -1162,7 +1168,7 @@ la_min = { display = "LA", color = "red" }
         insert_session(&conn, "2026-05-11", Some("zone2"), None);
         let today = NaiveDate::from_ymd_opt(2026, 5, 12).unwrap();
         let r = session_text_reminder("vo2", 7, SessionTextColumn::Type, "vo2_max");
-        let result = evaluate(&conn, today, &[r], &empty_config()).unwrap();
+        let result = evaluate(&conn, today, noon(), &[r], &empty_config()).unwrap();
         assert_eq!(
             result.reminders[0].last_done,
             Some(NaiveDate::from_ymd_opt(2026, 5, 10).unwrap())
@@ -1176,7 +1182,7 @@ la_min = { display = "LA", color = "red" }
         insert_session(&conn, "2026-05-10", Some("zone2"), None);
         let today = NaiveDate::from_ymd_opt(2026, 5, 12).unwrap();
         let r = session_text_reminder("vo2", 7, SessionTextColumn::Type, "vo2_max");
-        let result = evaluate(&conn, today, &[r], &empty_config()).unwrap();
+        let result = evaluate(&conn, today, noon(), &[r], &empty_config()).unwrap();
         assert_eq!(result.reminders[0].last_done, None);
         assert!(result.reminders[0].due);
     }
@@ -1188,7 +1194,7 @@ la_min = { display = "LA", color = "red" }
         insert_session(&conn, "2026-05-10", None, Some(30));
         let today = NaiveDate::from_ymd_opt(2026, 5, 12).unwrap();
         let r = session_num_reminder("zone2", 3, SessionNumColumn::ZoneTwoMin, 1.0);
-        let result = evaluate(&conn, today, &[r], &empty_config()).unwrap();
+        let result = evaluate(&conn, today, noon(), &[r], &empty_config()).unwrap();
         assert_eq!(
             result.reminders[0].last_done,
             Some(NaiveDate::from_ymd_opt(2026, 5, 10).unwrap())
@@ -1202,7 +1208,7 @@ la_min = { display = "LA", color = "red" }
         insert_session(&conn, "2026-05-11", None, Some(15));
         let today = NaiveDate::from_ymd_opt(2026, 5, 12).unwrap();
         let r = session_num_reminder("zone2_long", 1, SessionNumColumn::ZoneTwoMin, 30.0);
-        let result = evaluate(&conn, today, &[r], &empty_config()).unwrap();
+        let result = evaluate(&conn, today, noon(), &[r], &empty_config()).unwrap();
         assert_eq!(result.reminders[0].last_done, None);
         assert!(result.reminders[0].due);
     }
@@ -1251,7 +1257,7 @@ la_min = { display = "LA", color = "red" }
         insert_lift(&conn, "2026-05-11", "squat", 185.0, 5);
         let today = NaiveDate::from_ymd_opt(2026, 5, 12).unwrap();
         let r = lift_reminder("deads", 3, "deadlift", None, None);
-        let result = evaluate(&conn, today, &[r], &empty_config()).unwrap();
+        let result = evaluate(&conn, today, noon(), &[r], &empty_config()).unwrap();
         assert_eq!(
             result.reminders[0].last_done,
             Some(NaiveDate::from_ymd_opt(2026, 5, 9).unwrap())
@@ -1266,7 +1272,7 @@ la_min = { display = "LA", color = "red" }
         insert_lift(&conn, "2026-05-11", "deadlift", 135.0, 5);
         let today = NaiveDate::from_ymd_opt(2026, 5, 12).unwrap();
         let r = lift_reminder("heavy_deads", 7, "deadlift", Some(180.0), None);
-        let result = evaluate(&conn, today, &[r], &empty_config()).unwrap();
+        let result = evaluate(&conn, today, noon(), &[r], &empty_config()).unwrap();
         assert_eq!(
             result.reminders[0].last_done,
             Some(NaiveDate::from_ymd_opt(2026, 5, 9).unwrap())
@@ -1280,7 +1286,7 @@ la_min = { display = "LA", color = "red" }
         insert_lift(&conn, "2026-05-11", "deadlift", 250.0, 2);
         let today = NaiveDate::from_ymd_opt(2026, 5, 12).unwrap();
         let r = lift_reminder("deads_for_reps", 7, "deadlift", None, Some(4));
-        let result = evaluate(&conn, today, &[r], &empty_config()).unwrap();
+        let result = evaluate(&conn, today, noon(), &[r], &empty_config()).unwrap();
         assert_eq!(
             result.reminders[0].last_done,
             Some(NaiveDate::from_ymd_opt(2026, 5, 9).unwrap())
@@ -1293,7 +1299,7 @@ la_min = { display = "LA", color = "red" }
         insert_lift(&conn, "2026-05-09", "squat", 185.0, 5);
         let today = NaiveDate::from_ymd_opt(2026, 5, 12).unwrap();
         let r = lift_reminder("deads", 3, "deadlift", None, None);
-        let result = evaluate(&conn, today, &[r], &empty_config()).unwrap();
+        let result = evaluate(&conn, today, noon(), &[r], &empty_config()).unwrap();
         assert_eq!(result.reminders[0].last_done, None);
         assert!(result.reminders[0].due);
     }
@@ -1321,7 +1327,7 @@ la_min = { display = "LA", color = "red" }
         insert_day_field(&conn, "2026-05-11", "weight", "121.5");
         let today = NaiveDate::from_ymd_opt(2026, 5, 12).unwrap();
         let r = day_field_reminder("weigh_in", 1, DayColumn::Weight);
-        let result = evaluate(&conn, today, &[r], &empty_config()).unwrap();
+        let result = evaluate(&conn, today, noon(), &[r], &empty_config()).unwrap();
         assert_eq!(
             result.reminders[0].last_done,
             Some(NaiveDate::from_ymd_opt(2026, 5, 11).unwrap())
@@ -1337,7 +1343,7 @@ la_min = { display = "LA", color = "red" }
         insert_day_field(&conn, "2026-05-12", "sleep_hours", "7.5");
         let today = NaiveDate::from_ymd_opt(2026, 5, 12).unwrap();
         let r = day_field_reminder("sleep_log", 1, DayColumn::SleepHours);
-        let result = evaluate(&conn, today, &[r], &empty_config()).unwrap();
+        let result = evaluate(&conn, today, noon(), &[r], &empty_config()).unwrap();
         assert_eq!(result.reminders[0].days_since, Some(0));
         assert!(!result.reminders[0].due);
     }
@@ -1349,7 +1355,7 @@ la_min = { display = "LA", color = "red" }
         insert_day(&conn, "2026-05-12");
         let today = NaiveDate::from_ymd_opt(2026, 5, 12).unwrap();
         let r = day_field_reminder("weigh_in", 1, DayColumn::Weight);
-        let result = evaluate(&conn, today, &[r], &empty_config()).unwrap();
+        let result = evaluate(&conn, today, noon(), &[r], &empty_config()).unwrap();
         assert_eq!(result.reminders[0].last_done, None);
         assert!(result.reminders[0].due);
     }
@@ -1359,7 +1365,7 @@ la_min = { display = "LA", color = "red" }
         let conn = make_test_db();
         let today = NaiveDate::from_ymd_opt(2026, 5, 12).unwrap();
         let r = metric_reminder("typoed", 1, "definitely_not_in_metrics");
-        let result = evaluate(&conn, today, &[r], &empty_config()).unwrap();
+        let result = evaluate(&conn, today, noon(), &[r], &empty_config()).unwrap();
         assert!(result.reminders[0].due);
         assert!(
             result
@@ -1379,7 +1385,7 @@ la_min = { display = "LA", color = "red" }
         insert_metric(&conn, "2026-05-05", "legacy_metric", 1.0);
         let today = NaiveDate::from_ymd_opt(2026, 5, 12).unwrap();
         let r = metric_reminder("legacy", 1, "legacy_metric");
-        let result = evaluate(&conn, today, &[r], &empty_config()).unwrap();
+        let result = evaluate(&conn, today, noon(), &[r], &empty_config()).unwrap();
         assert!(result.warnings.is_empty(), "got: {:?}", result.warnings);
     }
 
@@ -1718,5 +1724,147 @@ not_after = "06:00"
             None,
             4,
         ));
+    }
+
+    fn noon() -> NaiveTime {
+        NaiveTime::from_hms_opt(12, 0, 0).unwrap()
+    }
+
+    #[test]
+    fn evaluate_data_overdue_before_window_not_due() {
+        let conn = make_test_db();
+        // Logged 3 days ago, interval=1 → data-overdue.
+        insert_metric(&conn, "2026-05-09", "la_min", 15.0);
+        let today = NaiveDate::from_ymd_opt(2026, 5, 12).unwrap();
+        let r = Reminder {
+            id: "evening".into(),
+            display: "Evening".into(),
+            interval_days: 1,
+            watch: WatchSource::Metric {
+                id: "la_min".into(),
+                count_zero_as_logged: false,
+            },
+            not_before: Some(NaiveTime::from_hms_opt(18, 0, 0).unwrap()),
+            not_after: None,
+        };
+        // Wall-clock 10:00 — before the gate.
+        let now = NaiveTime::from_hms_opt(10, 0, 0).unwrap();
+        let result = evaluate(&conn, today, now, &[r], &empty_config()).unwrap();
+        let er = &result.reminders[0];
+        assert_eq!(
+            er.last_done,
+            Some(NaiveDate::from_ymd_opt(2026, 5, 9).unwrap())
+        );
+        assert_eq!(er.days_since, Some(3));
+        assert!(!er.due, "data-overdue but before window → not due");
+    }
+
+    #[test]
+    fn evaluate_data_overdue_in_window_is_due() {
+        let conn = make_test_db();
+        insert_metric(&conn, "2026-05-09", "la_min", 15.0);
+        let today = NaiveDate::from_ymd_opt(2026, 5, 12).unwrap();
+        let r = Reminder {
+            id: "evening".into(),
+            display: "Evening".into(),
+            interval_days: 1,
+            watch: WatchSource::Metric {
+                id: "la_min".into(),
+                count_zero_as_logged: false,
+            },
+            not_before: Some(NaiveTime::from_hms_opt(18, 0, 0).unwrap()),
+            not_after: Some(NaiveTime::from_hms_opt(23, 0, 0).unwrap()),
+        };
+        let now = NaiveTime::from_hms_opt(20, 0, 0).unwrap();
+        let result = evaluate(&conn, today, now, &[r], &empty_config()).unwrap();
+        assert!(result.reminders[0].due);
+    }
+
+    #[test]
+    fn evaluate_data_overdue_after_window_not_due() {
+        let conn = make_test_db();
+        insert_metric(&conn, "2026-05-09", "la_min", 15.0);
+        let today = NaiveDate::from_ymd_opt(2026, 5, 12).unwrap();
+        let r = Reminder {
+            id: "morning".into(),
+            display: "Morning".into(),
+            interval_days: 1,
+            watch: WatchSource::Metric {
+                id: "la_min".into(),
+                count_zero_as_logged: false,
+            },
+            not_before: Some(NaiveTime::from_hms_opt(7, 0, 0).unwrap()),
+            not_after: Some(NaiveTime::from_hms_opt(12, 0, 0).unwrap()),
+        };
+        // Wall-clock 14:00 — past the upper bound.
+        let now = NaiveTime::from_hms_opt(14, 0, 0).unwrap();
+        let result = evaluate(&conn, today, now, &[r], &empty_config()).unwrap();
+        assert!(!result.reminders[0].due);
+    }
+
+    #[test]
+    fn evaluate_not_data_overdue_in_window_not_due() {
+        let conn = make_test_db();
+        // Logged today — not data-overdue.
+        insert_metric(&conn, "2026-05-12", "la_min", 15.0);
+        let today = NaiveDate::from_ymd_opt(2026, 5, 12).unwrap();
+        let r = Reminder {
+            id: "evening".into(),
+            display: "Evening".into(),
+            interval_days: 1,
+            watch: WatchSource::Metric {
+                id: "la_min".into(),
+                count_zero_as_logged: false,
+            },
+            not_before: Some(NaiveTime::from_hms_opt(18, 0, 0).unwrap()),
+            not_after: None,
+        };
+        let now = NaiveTime::from_hms_opt(20, 0, 0).unwrap();
+        let result = evaluate(&conn, today, now, &[r], &empty_config()).unwrap();
+        assert!(!result.reminders[0].due);
+    }
+
+    #[test]
+    fn evaluate_never_logged_outside_window_not_due() {
+        let conn = make_test_db();
+        // No history.
+        let today = NaiveDate::from_ymd_opt(2026, 5, 12).unwrap();
+        let r = Reminder {
+            id: "evening".into(),
+            display: "Evening".into(),
+            interval_days: 1,
+            watch: WatchSource::Metric {
+                id: "la_min".into(),
+                count_zero_as_logged: false,
+            },
+            not_before: Some(NaiveTime::from_hms_opt(18, 0, 0).unwrap()),
+            not_after: None,
+        };
+        let now = NaiveTime::from_hms_opt(10, 0, 0).unwrap();
+        let result = evaluate(&conn, today, now, &[r], &empty_config()).unwrap();
+        assert_eq!(result.reminders[0].last_done, None);
+        assert!(!result.reminders[0].due, "gate trumps 'never logged'");
+    }
+
+    #[test]
+    fn evaluate_propagates_not_before_not_after_into_evaluated_reminder() {
+        let conn = make_test_db();
+        let today = NaiveDate::from_ymd_opt(2026, 5, 12).unwrap();
+        let nb = NaiveTime::from_hms_opt(18, 0, 0).unwrap();
+        let na = NaiveTime::from_hms_opt(23, 0, 0).unwrap();
+        let r = Reminder {
+            id: "x".into(),
+            display: "X".into(),
+            interval_days: 1,
+            watch: WatchSource::Metric {
+                id: "la_min".into(),
+                count_zero_as_logged: false,
+            },
+            not_before: Some(nb),
+            not_after: Some(na),
+        };
+        let result = evaluate(&conn, today, noon(), &[r], &empty_config()).unwrap();
+        assert_eq!(result.reminders[0].not_before, Some(nb));
+        assert_eq!(result.reminders[0].not_after, Some(na));
     }
 }
