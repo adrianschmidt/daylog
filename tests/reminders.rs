@@ -185,25 +185,28 @@ target = "la_min"
         "---\ndate: 2026-05-09\nla_min: 15\n---\n\n## Food\n",
     );
 
-    // Pre-create the DB so status_cmd::execute can read it. We don't run
-    // sync here — status_cmd will do it internally.
-    let registry = modules::build_registry(&config);
-    let conn = db::open_rw(&config.db_path()).unwrap();
-    db::init_db(&conn, &registry).unwrap();
-    drop(conn);
-
-    // Use the testable helper rather than capturing stdout from execute.
     let registry = modules::build_registry(&config);
     let conn = db::open_rw(&config.db_path()).unwrap();
     db::init_db(&conn, &registry).unwrap();
     modules::validate_module_tables(&registry).unwrap();
-    let _ = vitalog::materializer::sync_all(&conn, &config.notes_dir_path(), &config, &registry);
+    vitalog::materializer::sync_all(&conn, &config.notes_dir_path(), &config, &registry).unwrap();
     let v = status_cmd::assemble_status(&conn, &config, &registry).unwrap();
 
     let arr = v["reminders"].as_array().unwrap();
     assert_eq!(arr.len(), 1);
-    assert_eq!(arr[0]["id"], "lactic_acid");
-    // The "due" state will depend on today's date when the test runs.
-    // We assert the shape, not the value.
-    assert!(arr[0]["last_done"].is_string() || arr[0]["last_done"].is_null());
+    let r = &arr[0];
+    assert_eq!(r["id"], "lactic_acid");
+    assert_eq!(r["display"], "Lactic acid training");
+    assert_eq!(r["interval_days"], 2);
+    assert!(r["due"].is_boolean(), "due should be a boolean, got: {r}");
+    assert!(
+        r["days_since"].is_number() || r["days_since"].is_null(),
+        "days_since should be number or null, got: {r}"
+    );
+    assert!(
+        r["last_done"].is_string() || r["last_done"].is_null(),
+        "last_done should be string or null, got: {r}"
+    );
+    // reminder_warnings is always an array
+    assert!(v["reminder_warnings"].is_array(), "got:\n{v}");
 }
