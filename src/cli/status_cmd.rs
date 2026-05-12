@@ -76,28 +76,9 @@ pub fn assemble_status(
     } else {
         crate::reminders::evaluate(conn, config.effective_today_date(), &reminders_defs, config)?
     };
-    let rs_json: Vec<serde_json::Value> = eval
-        .reminders
-        .iter()
-        .map(|r| {
-            serde_json::json!({
-                "id": r.id,
-                "display": r.display,
-                "interval_days": r.interval_days,
-                "last_done": r.last_done.map(|d| d.format("%Y-%m-%d").to_string()),
-                "days_since": r.days_since,
-                "due": r.due,
-            })
-        })
-        .collect();
-    output["reminders"] = serde_json::Value::Array(rs_json);
-
-    let warns_json: Vec<serde_json::Value> = eval
-        .warnings
-        .into_iter()
-        .map(serde_json::Value::String)
-        .collect();
-    output["reminder_warnings"] = serde_json::Value::Array(warns_json);
+    let (rs, warns) = crate::reminders::to_json(&eval.reminders, &eval.warnings);
+    output["reminders"] = rs;
+    output["reminder_warnings"] = warns;
 
     Ok(output)
 }
