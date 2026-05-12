@@ -379,25 +379,67 @@ fn toml_value_as_f64(v: &toml::Value) -> Option<f64> {
 /// per watched source. `today` is the effective today date (callers
 /// should pass `config.effective_today_date()`).
 pub fn evaluate(
-    _conn: &Connection,
-    _today: NaiveDate,
+    conn: &Connection,
+    today: NaiveDate,
     reminders: &[Reminder],
-    _config: &Config,
+    config: &Config,
 ) -> Result<EvaluationResult> {
+    let mut out = Vec::with_capacity(reminders.len());
+    let mut warnings = Vec::new();
+    for r in reminders {
+        let last_done = query_last_done(conn, &r.watch)?;
+        if let WatchSource::Metric { id, .. } = &r.watch {
+            if last_done.is_none() && !config.metrics.contains_key(id) {
+                warnings.push(format!(
+                    "reminder `{}`: target metric `{id}` is not declared in [metrics]",
+                    r.id
+                ));
+            }
+        }
+        let days_since = last_done.map(|d| (today - d).num_days());
+        let due = match days_since {
+            None => true,
+            Some(n) => n >= r.interval_days as i64,
+        };
+        out.push(EvaluatedReminder {
+            id: r.id.clone(),
+            display: r.display.clone(),
+            interval_days: r.interval_days,
+            last_done,
+            days_since,
+            due,
+        });
+    }
     Ok(EvaluationResult {
-        reminders: reminders
-            .iter()
-            .map(|r| EvaluatedReminder {
-                id: r.id.clone(),
-                display: r.display.clone(),
-                interval_days: r.interval_days,
-                last_done: None,
-                days_since: None,
-                due: true,
-            })
-            .collect(),
-        warnings: Vec::new(),
+        reminders: out,
+        warnings,
     })
+}
+
+/// Run one MAX(date) query per watch kind. Column names are taken from
+/// the closed enum variants — never substituted from user input — so
+/// `format!`-ing them into the SQL is safe.
+fn query_last_done(conn: &Connection, watch: &WatchSource) -> Result<Option<NaiveDate>> {
+    use color_eyre::eyre::WrapErr;
+
+    let date_str: Option<String> = match watch {
+        WatchSource::Metric {
+            id,
+            count_zero_as_logged,
+        } => {
+            let zero_flag: i64 = if *count_zero_as_logged { 1 } else { 0 };
+            conn.query_row(
+                "SELECT MAX(date) FROM metrics WHERE name = ?1 AND (value > 0 OR ?2 = 1)",
+                rusqlite::params![id, zero_flag],
+                |row| row.get::<_, Option<String>>(0),
+            )
+            .wrap_err("Failed to query metrics for reminder")?
+        }
+        // Other variants are filled in by later tasks; for now they all
+        // return None so we don't break the test scaffold.
+        _ => None,
+    };
+    Ok(date_str.and_then(|s| NaiveDate::parse_from_str(&s, "%Y-%m-%d").ok()))
 }
 
 #[cfg(test)]
@@ -699,5 +741,209 @@ target = "la_min"
         let mut cfg: Config = toml::from_str(r#"notes_dir = "/tmp/x""#).unwrap();
         cfg.reminders = HashMap::new();
         assert!(load_reminders(&cfg).unwrap().is_empty());
+    }
+
+    use rusqlite::Connection;
+
+    /// Minimal in-memory DB with the tables `evaluate` reads.
+    /// We mirror the production schema shape but skip foreign keys to keep
+    /// the test setup compact — these tests only exercise the reminder
+    /// queries, not referential integrity.
+    fn make_test_db() -> Connection {
+        let conn = Connection::open_in_memory().unwrap();
+        conn.execute_batch(
+            "
+            CREATE TABLE days (
+                date TEXT PRIMARY KEY,
+                sleep_start TEXT,
+                sleep_end TEXT,
+                sleep_hours REAL,
+                mood INTEGER,
+                energy INTEGER,
+                weight REAL
+            );
+            CREATE TABLE metrics (
+                date TEXT NOT NULL,
+                name TEXT NOT NULL,
+                value REAL NOT NULL,
+                PRIMARY KEY (date, name)
+            );
+            CREATE TABLE sessions (
+                date TEXT NOT NULL,
+                session_number INTEGER NOT NULL DEFAULT 1,
+                session_type TEXT,
+                week INTEGER,
+                block TEXT,
+                duration INTEGER,
+                rpe REAL,
+                zone2_min INTEGER,
+                hr_avg INTEGER,
+                vo2_intervals TEXT,
+                PRIMARY KEY (date, session_number)
+            );
+            CREATE TABLE lift_sets (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                date TEXT NOT NULL,
+                session_number INTEGER NOT NULL DEFAULT 1,
+                exercise TEXT NOT NULL,
+                set_number INTEGER NOT NULL,
+                weight_lbs REAL NOT NULL,
+                reps INTEGER NOT NULL,
+                estimated_1rm REAL
+            );
+            ",
+        )
+        .unwrap();
+        conn
+    }
+
+    fn metric_reminder(id: &str, interval_days: u32, metric: &str) -> Reminder {
+        Reminder {
+            id: id.into(),
+            display: id.into(),
+            interval_days,
+            watch: WatchSource::Metric {
+                id: metric.into(),
+                count_zero_as_logged: false,
+            },
+        }
+    }
+
+    fn insert_day(conn: &Connection, date: &str) {
+        conn.execute("INSERT OR IGNORE INTO days(date) VALUES (?1)", [date])
+            .unwrap();
+    }
+
+    fn insert_metric(conn: &Connection, date: &str, name: &str, value: f64) {
+        insert_day(conn, date);
+        conn.execute(
+            "INSERT INTO metrics(date, name, value) VALUES (?1, ?2, ?3)",
+            rusqlite::params![date, name, value],
+        )
+        .unwrap();
+    }
+
+    fn empty_config() -> Config {
+        toml::from_str(
+            r#"
+notes_dir = "/tmp/x"
+
+[metrics]
+la_min = { display = "LA", color = "red" }
+"#,
+        )
+        .unwrap()
+    }
+
+    #[test]
+    fn evaluate_metric_never_logged_is_due() {
+        let conn = make_test_db();
+        let today = NaiveDate::from_ymd_opt(2026, 5, 12).unwrap();
+        let result = evaluate(
+            &conn,
+            today,
+            &[metric_reminder("la", 2, "la_min")],
+            &empty_config(),
+        )
+        .unwrap();
+        assert_eq!(result.reminders.len(), 1);
+        let r = &result.reminders[0];
+        assert_eq!(r.last_done, None);
+        assert_eq!(r.days_since, None);
+        assert!(r.due);
+    }
+
+    #[test]
+    fn evaluate_metric_logged_today_not_due() {
+        let conn = make_test_db();
+        insert_metric(&conn, "2026-05-12", "la_min", 15.0);
+        let today = NaiveDate::from_ymd_opt(2026, 5, 12).unwrap();
+        let result = evaluate(
+            &conn,
+            today,
+            &[metric_reminder("la", 2, "la_min")],
+            &empty_config(),
+        )
+        .unwrap();
+        let r = &result.reminders[0];
+        assert_eq!(r.last_done, Some(today));
+        assert_eq!(r.days_since, Some(0));
+        assert!(!r.due);
+    }
+
+    #[test]
+    fn evaluate_metric_logged_exactly_interval_days_ago_is_due() {
+        // interval=2, logged Monday at 23:00 (DB only stores date),
+        // checking Wednesday → due all day Wednesday.
+        let conn = make_test_db();
+        insert_metric(&conn, "2026-05-10", "la_min", 15.0);
+        let today = NaiveDate::from_ymd_opt(2026, 5, 12).unwrap();
+        let result = evaluate(
+            &conn,
+            today,
+            &[metric_reminder("la", 2, "la_min")],
+            &empty_config(),
+        )
+        .unwrap();
+        let r = &result.reminders[0];
+        assert_eq!(
+            r.last_done,
+            Some(NaiveDate::from_ymd_opt(2026, 5, 10).unwrap())
+        );
+        assert_eq!(r.days_since, Some(2));
+        assert!(r.due);
+    }
+
+    #[test]
+    fn evaluate_metric_logged_interval_minus_one_days_ago_not_due() {
+        // interval=2, logged yesterday → not due today.
+        let conn = make_test_db();
+        insert_metric(&conn, "2026-05-11", "la_min", 15.0);
+        let today = NaiveDate::from_ymd_opt(2026, 5, 12).unwrap();
+        let result = evaluate(
+            &conn,
+            today,
+            &[metric_reminder("la", 2, "la_min")],
+            &empty_config(),
+        )
+        .unwrap();
+        let r = &result.reminders[0];
+        assert_eq!(r.days_since, Some(1));
+        assert!(!r.due);
+    }
+
+    #[test]
+    fn evaluate_metric_zero_value_does_not_count_by_default() {
+        let conn = make_test_db();
+        insert_metric(&conn, "2026-05-12", "la_min", 0.0);
+        let today = NaiveDate::from_ymd_opt(2026, 5, 12).unwrap();
+        let result = evaluate(
+            &conn,
+            today,
+            &[metric_reminder("la", 2, "la_min")],
+            &empty_config(),
+        )
+        .unwrap();
+        assert_eq!(result.reminders[0].last_done, None);
+        assert!(result.reminders[0].due);
+    }
+
+    #[test]
+    fn evaluate_metric_zero_value_counts_when_opted_in() {
+        let conn = make_test_db();
+        insert_metric(&conn, "2026-05-12", "la_min", 0.0);
+        let today = NaiveDate::from_ymd_opt(2026, 5, 12).unwrap();
+        let reminder = Reminder {
+            id: "la".into(),
+            display: "LA".into(),
+            interval_days: 1,
+            watch: WatchSource::Metric {
+                id: "la_min".into(),
+                count_zero_as_logged: true,
+            },
+        };
+        let result = evaluate(&conn, today, &[reminder], &empty_config()).unwrap();
+        assert_eq!(result.reminders[0].last_done, Some(today));
+        assert!(!result.reminders[0].due);
     }
 }
