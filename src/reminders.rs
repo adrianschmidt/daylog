@@ -429,6 +429,26 @@ fn offset_minutes(t: NaiveTime, day_start_hour: u8) -> u32 {
     }
 }
 
+/// Returns true if `now` falls inside the effective-day window defined by
+/// `not_before` and `not_after`. Either bound being `None` means "no
+/// limit on that side". Uses `offset_minutes` so non-zero `day_start_hour`
+/// values correctly attribute wall-clock times to the right effective day.
+//
+// `#[allow(dead_code)]` because the production caller (in `evaluate`)
+// lands in a follow-up commit; tests below exercise this helper.
+#[allow(dead_code)]
+fn within_time_window(
+    now: NaiveTime,
+    not_before: Option<NaiveTime>,
+    not_after: Option<NaiveTime>,
+    day_start_hour: u8,
+) -> bool {
+    let now_off = offset_minutes(now, day_start_hour);
+    let after_lower = not_before.is_none_or(|nb| now_off >= offset_minutes(nb, day_start_hour));
+    let before_upper = not_after.is_none_or(|na| now_off <= offset_minutes(na, day_start_hour));
+    after_lower && before_upper
+}
+
 /// Evaluate reminders against the current DB state, computing `last_done`
 /// per watched source. `today` is the effective today date (callers
 /// should pass `config.effective_today_date()`).
@@ -1557,5 +1577,146 @@ not_after = "06:00"
         let err = load_reminders(&config).unwrap_err();
         let msg = format!("{err}");
         assert!(msg.contains("not_after"), "got: {msg}");
+    }
+
+    #[test]
+    fn within_time_window_no_gates_always_true() {
+        let now = NaiveTime::from_hms_opt(3, 14, 0).unwrap();
+        assert!(within_time_window(now, None, None, 0));
+    }
+
+    #[test]
+    fn within_time_window_lower_only() {
+        let nb = NaiveTime::from_hms_opt(18, 0, 0).unwrap();
+        let before = NaiveTime::from_hms_opt(17, 59, 0).unwrap();
+        let on = NaiveTime::from_hms_opt(18, 0, 0).unwrap();
+        let after = NaiveTime::from_hms_opt(18, 1, 0).unwrap();
+        assert!(!within_time_window(before, Some(nb), None, 0));
+        assert!(within_time_window(on, Some(nb), None, 0));
+        assert!(within_time_window(after, Some(nb), None, 0));
+    }
+
+    #[test]
+    fn within_time_window_upper_only() {
+        let na = NaiveTime::from_hms_opt(12, 0, 0).unwrap();
+        let before = NaiveTime::from_hms_opt(11, 59, 0).unwrap();
+        let on = NaiveTime::from_hms_opt(12, 0, 0).unwrap();
+        let after = NaiveTime::from_hms_opt(12, 1, 0).unwrap();
+        assert!(within_time_window(before, None, Some(na), 0));
+        assert!(within_time_window(on, None, Some(na), 0));
+        assert!(!within_time_window(after, None, Some(na), 0));
+    }
+
+    #[test]
+    fn within_time_window_both_gates() {
+        let nb = NaiveTime::from_hms_opt(18, 0, 0).unwrap();
+        let na = NaiveTime::from_hms_opt(23, 0, 0).unwrap();
+        assert!(!within_time_window(
+            NaiveTime::from_hms_opt(17, 0, 0).unwrap(),
+            Some(nb),
+            Some(na),
+            0,
+        ));
+        assert!(within_time_window(
+            NaiveTime::from_hms_opt(20, 0, 0).unwrap(),
+            Some(nb),
+            Some(na),
+            0,
+        ));
+        assert!(!within_time_window(
+            NaiveTime::from_hms_opt(23, 30, 0).unwrap(),
+            Some(nb),
+            Some(na),
+            0,
+        ));
+    }
+
+    #[test]
+    fn within_time_window_day_start_hour_zero_baseline() {
+        // Sanity check: at day_start_hour = 0, offset math reduces to
+        // wall-clock comparison.
+        let nb = NaiveTime::from_hms_opt(6, 0, 0).unwrap();
+        let na = NaiveTime::from_hms_opt(22, 0, 0).unwrap();
+        assert!(!within_time_window(
+            NaiveTime::from_hms_opt(5, 59, 0).unwrap(),
+            Some(nb),
+            Some(na),
+            0,
+        ));
+        assert!(within_time_window(
+            NaiveTime::from_hms_opt(12, 0, 0).unwrap(),
+            Some(nb),
+            Some(na),
+            0,
+        ));
+        assert!(!within_time_window(
+            NaiveTime::from_hms_opt(22, 1, 0).unwrap(),
+            Some(nb),
+            Some(na),
+            0,
+        ));
+    }
+
+    #[test]
+    fn within_time_window_evening_gate_with_day_start_four() {
+        // day_start_hour = 4, not_before = "22:00" → offset 1080.
+        // Gate is open from 22:00 wall-clock through 03:59 the next
+        // wall-day (offset 1439), then closes at 04:00 (offset 0).
+        let nb = NaiveTime::from_hms_opt(22, 0, 0).unwrap();
+        assert!(!within_time_window(
+            NaiveTime::from_hms_opt(21, 59, 0).unwrap(),
+            Some(nb),
+            None,
+            4,
+        ));
+        assert!(within_time_window(
+            NaiveTime::from_hms_opt(22, 0, 0).unwrap(),
+            Some(nb),
+            None,
+            4,
+        ));
+        // 01:00 wall-clock the next day — still within the effective day
+        // that started at 04:00 yesterday.
+        assert!(within_time_window(
+            NaiveTime::from_hms_opt(1, 0, 0).unwrap(),
+            Some(nb),
+            None,
+            4,
+        ));
+        // 04:00 wall-clock — new effective day starts, gate closes
+        // until the next 22:00.
+        assert!(!within_time_window(
+            NaiveTime::from_hms_opt(4, 0, 0).unwrap(),
+            Some(nb),
+            None,
+            4,
+        ));
+    }
+
+    #[test]
+    fn within_time_window_early_morning_gate_with_day_start_four() {
+        // day_start_hour = 4, not_before = "02:00" → offset 1320 (late
+        // in the effective day, near its end). Gate opens at 02:00
+        // wall-clock the day after the effective day started.
+        let nb = NaiveTime::from_hms_opt(2, 0, 0).unwrap();
+        assert!(!within_time_window(
+            NaiveTime::from_hms_opt(1, 59, 0).unwrap(),
+            Some(nb),
+            None,
+            4,
+        ));
+        assert!(within_time_window(
+            NaiveTime::from_hms_opt(2, 30, 0).unwrap(),
+            Some(nb),
+            None,
+            4,
+        ));
+        // 04:00 — effective day rolls, gate closes.
+        assert!(!within_time_window(
+            NaiveTime::from_hms_opt(4, 0, 0).unwrap(),
+            Some(nb),
+            None,
+            4,
+        ));
     }
 }
