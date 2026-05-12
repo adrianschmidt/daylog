@@ -26,6 +26,16 @@ pub fn execute(config: &Config) -> Result<()> {
     modules::validate_module_tables(&registry)?;
     let _ = materializer::sync_all(&conn, &config.notes_dir_path(), config, &registry);
 
+    let output = assemble_status(&conn, config, &registry)?;
+    println!("{}", serde_json::to_string_pretty(&output)?);
+    Ok(())
+}
+
+pub(crate) fn assemble_status(
+    conn: &rusqlite::Connection,
+    config: &Config,
+    registry: &[Box<dyn modules::Module>],
+) -> Result<serde_json::Value> {
     let today = config.effective_today();
 
     let mut output = serde_json::json!({
@@ -33,12 +43,12 @@ pub fn execute(config: &Config) -> Result<()> {
         "day_start_hour": config.day_start_hour,
         "weight_unit": config.weight_unit.to_string(),
     });
-    if let Some(day_data) = db::load_today(&conn, &today)? {
+    if let Some(day_data) = db::load_today(conn, &today)? {
         output["today"] = day_data;
     }
 
-    for module in &registry {
-        if let Some(status) = module.status_json(&conn, config) {
+    for module in registry {
+        if let Some(status) = module.status_json(conn, config) {
             output[module.id()] = status;
         }
     }
@@ -53,12 +63,127 @@ pub fn execute(config: &Config) -> Result<()> {
         });
     }
 
-    let nutrition = db::nutrition_status(&conn)?;
+    let nutrition = db::nutrition_status(conn)?;
     output["nutrition_db"] = serde_json::json!({
         "foods_count": nutrition.foods_count,
         "last_synced": nutrition.last_synced,
     });
 
-    println!("{}", serde_json::to_string_pretty(&output)?);
-    Ok(())
+    // Reminders.
+    let reminders_defs = crate::reminders::load_reminders(config)?;
+    let eval = if reminders_defs.is_empty() {
+        crate::reminders::EvaluationResult::default()
+    } else {
+        crate::reminders::evaluate(conn, config.effective_today_date(), &reminders_defs, config)?
+    };
+    let rs_json: Vec<serde_json::Value> = eval
+        .reminders
+        .iter()
+        .map(|r| {
+            serde_json::json!({
+                "id": r.id,
+                "display": r.display,
+                "interval_days": r.interval_days,
+                "last_done": r.last_done.map(|d| d.format("%Y-%m-%d").to_string()),
+                "days_since": r.days_since,
+                "due": r.due,
+            })
+        })
+        .collect();
+    output["reminders"] = serde_json::Value::Array(rs_json);
+
+    let warns_json: Vec<serde_json::Value> = eval
+        .warnings
+        .into_iter()
+        .map(serde_json::Value::String)
+        .collect();
+    output["reminder_warnings"] = serde_json::Value::Array(warns_json);
+
+    Ok(output)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::db;
+
+    fn config_in(notes_dir: &std::path::Path, reminders_toml: &str) -> Config {
+        let toml_str = format!(
+            r#"
+notes_dir = "{}"
+time_format = "24h"
+weight_unit = "kg"
+
+[metrics]
+la_min = {{ display = "Lactic acid (min)", color = "red" }}
+
+{reminders_toml}
+"#,
+            notes_dir.display().to_string().replace('\\', "/")
+        );
+        toml::from_str(&toml_str).unwrap()
+    }
+
+    /// Run the body of execute() but return the JSON value instead of
+    /// printing it. Used by tests to assert on the shape without
+    /// scraping stdout.
+    fn build_status_json(config: &Config) -> Result<serde_json::Value> {
+        let registry = crate::modules::build_registry(config);
+        let db_path = config.db_path();
+        let conn = db::open_rw(&db_path)?;
+        db::init_db(&conn, &registry)?;
+        crate::modules::validate_module_tables(&registry)?;
+        let _ = crate::materializer::sync_all(&conn, &config.notes_dir_path(), config, &registry);
+        super::assemble_status(&conn, config, &registry)
+    }
+
+    #[test]
+    fn status_json_contains_empty_reminders_when_none_configured() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let config = config_in(dir.path(), "");
+        let v = build_status_json(&config).unwrap();
+        assert!(v["reminders"].is_array(), "got:\n{v}");
+        assert_eq!(v["reminders"].as_array().unwrap().len(), 0);
+        assert!(v["reminder_warnings"].is_array(), "got:\n{v}");
+    }
+
+    #[test]
+    fn status_json_includes_due_reminder() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let config = config_in(
+            dir.path(),
+            r#"
+[reminders.lactic_acid]
+display = "Lactic acid training"
+interval_days = 2
+watch = "metric"
+target = "la_min"
+"#,
+        );
+        let v = build_status_json(&config).unwrap();
+        let arr = v["reminders"].as_array().unwrap();
+        assert_eq!(arr.len(), 1);
+        assert_eq!(arr[0]["id"], "lactic_acid");
+        assert_eq!(arr[0]["due"], true);
+        assert!(arr[0]["last_done"].is_null());
+    }
+
+    #[test]
+    fn status_json_unknown_metric_target_warns() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let config = config_in(
+            dir.path(),
+            r#"
+[reminders.typo]
+display = "Typo"
+interval_days = 1
+watch = "metric"
+target = "nonexistent"
+"#,
+        );
+        let v = build_status_json(&config).unwrap();
+        let warns = v["reminder_warnings"].as_array().unwrap();
+        assert_eq!(warns.len(), 1);
+        assert!(warns[0].as_str().unwrap().contains("nonexistent"));
+    }
 }
