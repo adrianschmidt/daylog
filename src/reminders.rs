@@ -174,13 +174,36 @@ pub fn load_reminders(config: &Config) -> Result<Vec<Reminder>> {
                 .suggestion("watch must be one of: metric, session, lift, day_field.");
             }
         };
+        let not_before = cfg
+            .not_before
+            .as_deref()
+            .map(|s| parse_time_field(id, "not_before", s))
+            .transpose()?;
+        let not_after = cfg
+            .not_after
+            .as_deref()
+            .map(|s| parse_time_field(id, "not_after", s))
+            .transpose()?;
+        if let (Some(nb), Some(na)) = (not_before, not_after) {
+            let nb_off = offset_minutes(nb, config.day_start_hour);
+            let na_off = offset_minutes(na, config.day_start_hour);
+            if nb_off > na_off {
+                return Err(color_eyre::eyre::eyre!(
+                    "reminder `{id}`: not_after must not be earlier than not_before within the effective day (with day_start_hour = {})",
+                    config.day_start_hour
+                ))
+                .suggestion(
+                    "For overnight reminders, split into two reminders on the same metric — one with not_after, the other with not_before.",
+                );
+            }
+        }
         out.push(Reminder {
             id: id.clone(),
             display: cfg.display.clone(),
             interval_days: cfg.interval_days,
             watch,
-            not_before: None,
-            not_after: None,
+            not_before,
+            not_after,
         });
     }
     out.sort_by(|a, b| a.id.cmp(&b.id));
@@ -378,6 +401,31 @@ fn toml_value_as_f64(v: &toml::Value) -> Option<f64> {
         toml::Value::Float(f) => Some(*f),
         toml::Value::Integer(i) => Some(*i as f64),
         _ => None,
+    }
+}
+
+/// Parse an `HH:MM` time-of-day string. Returns a clear eyre error
+/// (with `.suggestion()`) on failure, mentioning the reminder id and
+/// the field name.
+fn parse_time_field(id: &str, label: &str, s: &str) -> Result<NaiveTime> {
+    use color_eyre::Help;
+    NaiveTime::parse_from_str(s, "%H:%M")
+        .map_err(|_| color_eyre::eyre::eyre!("reminder `{id}`: invalid {label} `{s}`"))
+        .suggestion("Use HH:MM in 24-hour form, e.g., \"18:00\".")
+}
+
+/// Minutes elapsed since the effective-day start. With `day_start_hour = 0`
+/// this is just `t.hour() * 60 + t.minute()`; with non-zero `day_start_hour`
+/// it wraps so a wall-clock time before the day-start gets attributed to
+/// the previous effective day.
+fn offset_minutes(t: NaiveTime, day_start_hour: u8) -> u32 {
+    use chrono::Timelike;
+    let t_mins = t.hour() * 60 + t.minute();
+    let start_mins = day_start_hour as u32 * 60;
+    if t_mins >= start_mins {
+        t_mins - start_mins
+    } else {
+        t_mins + 24 * 60 - start_mins
     }
 }
 
@@ -1313,5 +1361,201 @@ la_min = { display = "LA", color = "red" }
         let r = metric_reminder("legacy", 1, "legacy_metric");
         let result = evaluate(&conn, today, &[r], &empty_config()).unwrap();
         assert!(result.warnings.is_empty(), "got: {:?}", result.warnings);
+    }
+
+    #[test]
+    fn load_parses_not_before_and_not_after() {
+        let config = config_with(
+            r#"
+[reminders.brush_evening]
+display = "Brush teeth (evening)"
+interval_days = 1
+watch = "metric"
+target = "la_min"
+not_before = "18:00"
+not_after = "23:00"
+"#,
+        );
+        let rs = load_reminders(&config).unwrap();
+        assert_eq!(
+            rs[0].not_before,
+            Some(NaiveTime::from_hms_opt(18, 0, 0).unwrap())
+        );
+        assert_eq!(
+            rs[0].not_after,
+            Some(NaiveTime::from_hms_opt(23, 0, 0).unwrap())
+        );
+    }
+
+    #[test]
+    fn load_parses_not_before_only() {
+        let config = config_with(
+            r#"
+[reminders.la]
+display = "LA"
+interval_days = 2
+watch = "metric"
+target = "la_min"
+not_before = "10:00"
+"#,
+        );
+        let rs = load_reminders(&config).unwrap();
+        assert_eq!(
+            rs[0].not_before,
+            Some(NaiveTime::from_hms_opt(10, 0, 0).unwrap())
+        );
+        assert_eq!(rs[0].not_after, None);
+    }
+
+    #[test]
+    fn load_parses_not_after_only() {
+        let config = config_with(
+            r#"
+[reminders.morning]
+display = "Morning"
+interval_days = 1
+watch = "metric"
+target = "la_min"
+not_after = "12:00"
+"#,
+        );
+        let rs = load_reminders(&config).unwrap();
+        assert_eq!(rs[0].not_before, None);
+        assert_eq!(
+            rs[0].not_after,
+            Some(NaiveTime::from_hms_opt(12, 0, 0).unwrap())
+        );
+    }
+
+    #[test]
+    fn load_no_time_gates_yields_none() {
+        let config = config_with(
+            r#"
+[reminders.la]
+display = "LA"
+interval_days = 2
+watch = "metric"
+target = "la_min"
+"#,
+        );
+        let rs = load_reminders(&config).unwrap();
+        assert_eq!(rs[0].not_before, None);
+        assert_eq!(rs[0].not_after, None);
+    }
+
+    #[test]
+    fn load_rejects_unparseable_not_before() {
+        let config = config_with(
+            r#"
+[reminders.bad]
+display = "Bad"
+interval_days = 1
+watch = "metric"
+target = "la_min"
+not_before = "25:00"
+"#,
+        );
+        let err = load_reminders(&config).unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("not_before"), "got: {msg}");
+        assert!(msg.contains("25:00"), "got: {msg}");
+        assert!(msg.contains("bad"), "got: {msg}");
+    }
+
+    #[test]
+    fn load_rejects_unparseable_not_after() {
+        let config = config_with(
+            r#"
+[reminders.bad]
+display = "Bad"
+interval_days = 1
+watch = "metric"
+target = "la_min"
+not_after = "noon"
+"#,
+        );
+        let err = load_reminders(&config).unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("not_after"), "got: {msg}");
+        assert!(msg.contains("noon"), "got: {msg}");
+    }
+
+    #[test]
+    fn load_rejects_window_wraparound_default_day_start() {
+        // day_start_hour = 0 (default): a window from 22:00 to 06:00 crosses
+        // the effective-day boundary → reject.
+        let config = config_with(
+            r#"
+[reminders.bad]
+display = "Bad"
+interval_days = 1
+watch = "metric"
+target = "la_min"
+not_before = "22:00"
+not_after = "06:00"
+"#,
+        );
+        let err = load_reminders(&config).unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("not_after"), "got: {msg}");
+        assert!(msg.contains("not_before"), "got: {msg}");
+    }
+
+    #[test]
+    fn load_accepts_window_wrapping_wall_clock_with_day_start_hour() {
+        // day_start_hour = 4: a window 22:00 → 02:00 spans midnight in
+        // wall-clock but stays within the effective day (offsets 1080 → 1320)
+        // → accept.
+        let toml_str = r#"
+notes_dir = "/tmp/x"
+day_start_hour = 4
+
+[metrics]
+la_min = { display = "LA", color = "red" }
+
+[reminders.evening]
+display = "Evening"
+interval_days = 1
+watch = "metric"
+target = "la_min"
+not_before = "22:00"
+not_after = "02:00"
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        let rs = load_reminders(&config).unwrap();
+        assert_eq!(
+            rs[0].not_before,
+            Some(NaiveTime::from_hms_opt(22, 0, 0).unwrap())
+        );
+        assert_eq!(
+            rs[0].not_after,
+            Some(NaiveTime::from_hms_opt(2, 0, 0).unwrap())
+        );
+    }
+
+    #[test]
+    fn load_rejects_window_crossing_effective_day_with_day_start_hour() {
+        // day_start_hour = 4: not_before = 02:00 (offset 1320, late in
+        // effective day D), not_after = 06:00 (offset 120, early in
+        // effective day D+1) → reject.
+        let toml_str = r#"
+notes_dir = "/tmp/x"
+day_start_hour = 4
+
+[metrics]
+la_min = { display = "LA", color = "red" }
+
+[reminders.bad]
+display = "Bad"
+interval_days = 1
+watch = "metric"
+target = "la_min"
+not_before = "02:00"
+not_after = "06:00"
+"#;
+        let config: Config = toml::from_str(toml_str).unwrap();
+        let err = load_reminders(&config).unwrap_err();
+        let msg = format!("{err}");
+        assert!(msg.contains("not_after"), "got: {msg}");
     }
 }
