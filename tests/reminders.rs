@@ -1,0 +1,209 @@
+//! End-to-end tests for the [reminders] feature.
+
+use chrono::NaiveDate;
+use vitalog::cli::status_cmd;
+use vitalog::cli::today_cmd::{
+    assemble, render_json_with_reminders, render_reminders_block, render_text,
+};
+use vitalog::config::Config;
+use vitalog::db;
+use vitalog::goals::load_goals;
+use vitalog::modules;
+use vitalog::reminders::{evaluate, load_reminders};
+
+fn setup_with_reminders(reminders_toml: &str) -> (tempfile::TempDir, Config) {
+    let dir = tempfile::TempDir::new().unwrap();
+    let path = dir.path().display().to_string().replace('\\', "/");
+    let toml_str = format!(
+        r#"
+notes_dir = "{path}"
+time_format = "24h"
+weight_unit = "kg"
+
+[metrics]
+la_min = {{ display = "Lactic acid (min)", color = "red", unit = "min" }}
+
+[exercises]
+deadlift = {{ display = "Deadlift", color = "yellow" }}
+
+{reminders_toml}
+"#
+    );
+    let config: Config = toml::from_str(&toml_str).unwrap();
+    (dir, config)
+}
+
+fn write_note(notes_dir: &std::path::Path, date: &str, body: &str) {
+    std::fs::write(notes_dir.join(format!("{date}.md")), body).unwrap();
+}
+
+#[test]
+fn today_text_shows_overdue_lactic_acid_reminder() {
+    let (dir, config) = setup_with_reminders(
+        r#"
+[reminders.lactic_acid]
+display = "Lactic acid training"
+interval_days = 2
+watch = "metric"
+target = "la_min"
+"#,
+    );
+
+    // Last LA session was 3 days before our test "today".
+    write_note(
+        dir.path(),
+        "2026-05-09",
+        "---\ndate: 2026-05-09\nla_min: 15\n---\n\n## Food\n",
+    );
+
+    let registry = modules::build_registry(&config);
+    let conn = db::open_rw(&config.db_path()).unwrap();
+    db::init_db(&conn, &registry).unwrap();
+    modules::validate_module_tables(&registry).unwrap();
+    vitalog::materializer::sync_all(&conn, &config.notes_dir_path(), &config, &registry).unwrap();
+
+    let date = NaiveDate::from_ymd_opt(2026, 5, 12).unwrap();
+    let summary = assemble(date, &config, &conn).unwrap();
+    let goals = load_goals(&config.notes_dir_path()).unwrap();
+    let reminders = load_reminders(&config).unwrap();
+    let eval = evaluate(&conn, date, &reminders, &config).unwrap();
+
+    let block = render_reminders_block(&eval.reminders, false);
+    let body = render_text(&summary, &goals, false);
+
+    assert!(block.contains("Reminders"), "got:\n{block}");
+    assert!(block.contains("Lactic acid training"), "got:\n{block}");
+    assert!(block.contains("3 days ago"), "got:\n{block}");
+    assert!(block.contains("2026-05-09"), "got:\n{block}");
+
+    // Combined: reminder block precedes date header.
+    let combined = format!("{block}{body}");
+    let header_idx = combined.find("2026-05-12 — Daily summary").unwrap();
+    let rem_idx = combined.find("Lactic acid training").unwrap();
+    assert!(rem_idx < header_idx, "got:\n{combined}");
+}
+
+#[test]
+fn today_text_silent_when_no_reminder_due() {
+    let (dir, config) = setup_with_reminders(
+        r#"
+[reminders.lactic_acid]
+display = "Lactic acid training"
+interval_days = 2
+watch = "metric"
+target = "la_min"
+"#,
+    );
+
+    // Logged today → not due.
+    write_note(
+        dir.path(),
+        "2026-05-12",
+        "---\ndate: 2026-05-12\nla_min: 15\n---\n\n## Food\n",
+    );
+
+    let registry = modules::build_registry(&config);
+    let conn = db::open_rw(&config.db_path()).unwrap();
+    db::init_db(&conn, &registry).unwrap();
+    modules::validate_module_tables(&registry).unwrap();
+    vitalog::materializer::sync_all(&conn, &config.notes_dir_path(), &config, &registry).unwrap();
+
+    let date = NaiveDate::from_ymd_opt(2026, 5, 12).unwrap();
+    let reminders = load_reminders(&config).unwrap();
+    let eval = evaluate(&conn, date, &reminders, &config).unwrap();
+
+    let block = render_reminders_block(&eval.reminders, false);
+    assert!(block.is_empty(), "expected empty block, got:\n{block:?}");
+}
+
+#[test]
+fn today_json_includes_all_reminders_including_not_due() {
+    let (dir, config) = setup_with_reminders(
+        r#"
+[reminders.lactic_acid]
+display = "Lactic acid training"
+interval_days = 2
+watch = "metric"
+target = "la_min"
+
+[reminders.weigh_in]
+display = "Daily weigh-in"
+interval_days = 1
+watch = "day_field"
+target = "weight"
+"#,
+    );
+
+    // LA done today (not due), weight never logged (due).
+    write_note(
+        dir.path(),
+        "2026-05-12",
+        "---\ndate: 2026-05-12\nla_min: 15\n---\n\n## Food\n",
+    );
+
+    let registry = modules::build_registry(&config);
+    let conn = db::open_rw(&config.db_path()).unwrap();
+    db::init_db(&conn, &registry).unwrap();
+    modules::validate_module_tables(&registry).unwrap();
+    vitalog::materializer::sync_all(&conn, &config.notes_dir_path(), &config, &registry).unwrap();
+
+    let date = NaiveDate::from_ymd_opt(2026, 5, 12).unwrap();
+    let summary = assemble(date, &config, &conn).unwrap();
+    let goals = load_goals(&config.notes_dir_path()).unwrap();
+    let reminders = load_reminders(&config).unwrap();
+    let eval = evaluate(&conn, date, &reminders, &config).unwrap();
+
+    let v = render_json_with_reminders(&summary, &goals, &eval.reminders, &eval.warnings);
+    let arr = v["reminders"].as_array().unwrap();
+    assert_eq!(arr.len(), 2);
+
+    let la = arr.iter().find(|r| r["id"] == "lactic_acid").unwrap();
+    assert_eq!(la["due"], false);
+    assert_eq!(la["last_done"], "2026-05-12");
+    assert_eq!(la["days_since"], 0);
+
+    let weigh = arr.iter().find(|r| r["id"] == "weigh_in").unwrap();
+    assert_eq!(weigh["due"], true);
+    assert!(weigh["last_done"].is_null());
+}
+
+#[test]
+fn status_json_includes_reminders_after_sync() {
+    let (dir, config) = setup_with_reminders(
+        r#"
+[reminders.lactic_acid]
+display = "Lactic acid training"
+interval_days = 2
+watch = "metric"
+target = "la_min"
+"#,
+    );
+
+    write_note(
+        dir.path(),
+        "2026-05-09",
+        "---\ndate: 2026-05-09\nla_min: 15\n---\n\n## Food\n",
+    );
+
+    // Pre-create the DB so status_cmd::execute can read it. We don't run
+    // sync here — status_cmd will do it internally.
+    let registry = modules::build_registry(&config);
+    let conn = db::open_rw(&config.db_path()).unwrap();
+    db::init_db(&conn, &registry).unwrap();
+    drop(conn);
+
+    // Use the testable helper rather than capturing stdout from execute.
+    let registry = modules::build_registry(&config);
+    let conn = db::open_rw(&config.db_path()).unwrap();
+    db::init_db(&conn, &registry).unwrap();
+    modules::validate_module_tables(&registry).unwrap();
+    let _ = vitalog::materializer::sync_all(&conn, &config.notes_dir_path(), &config, &registry);
+    let v = status_cmd::assemble_status(&conn, &config, &registry).unwrap();
+
+    let arr = v["reminders"].as_array().unwrap();
+    assert_eq!(arr.len(), 1);
+    assert_eq!(arr[0]["id"], "lactic_acid");
+    // The "due" state will depend on today's date when the test runs.
+    // We assert the shape, not the value.
+    assert!(arr[0]["last_done"].is_string() || arr[0]["last_done"].is_null());
+}
