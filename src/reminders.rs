@@ -477,9 +477,14 @@ fn query_last_done(conn: &Connection, watch: &WatchSource) -> Result<Option<Naiv
             })
             .wrap_err("Failed to query lift_sets for reminder")?
         }
-        // Other variants are filled in by later tasks; for now they all
-        // return None so we don't break the test scaffold.
-        _ => None,
+        WatchSource::DayField(col) => {
+            let sql = format!(
+                "SELECT MAX(date) FROM days WHERE {} IS NOT NULL",
+                col.sql_column()
+            );
+            conn.query_row(&sql, [], |row| row.get::<_, Option<String>>(0))
+                .wrap_err("Failed to query days for reminder")?
+        }
     };
     Ok(date_str.and_then(|s| NaiveDate::parse_from_str(&s, "%Y-%m-%d").ok()))
 }
@@ -1174,5 +1179,88 @@ la_min = { display = "LA", color = "red" }
         let result = evaluate(&conn, today, &[r], &empty_config()).unwrap();
         assert_eq!(result.reminders[0].last_done, None);
         assert!(result.reminders[0].due);
+    }
+
+    fn insert_day_field(conn: &Connection, date: &str, column: &str, value: &str) {
+        insert_day(conn, date);
+        let sql = format!("UPDATE days SET {column} = ?1 WHERE date = ?2");
+        conn.execute(&sql, [value, date]).unwrap();
+    }
+
+    fn day_field_reminder(id: &str, interval: u32, col: DayColumn) -> Reminder {
+        Reminder {
+            id: id.into(),
+            display: id.into(),
+            interval_days: interval,
+            watch: WatchSource::DayField(col),
+        }
+    }
+
+    #[test]
+    fn evaluate_day_field_weight_match() {
+        let conn = make_test_db();
+        insert_day_field(&conn, "2026-05-11", "weight", "121.5");
+        let today = NaiveDate::from_ymd_opt(2026, 5, 12).unwrap();
+        let r = day_field_reminder("weigh_in", 1, DayColumn::Weight);
+        let result = evaluate(&conn, today, &[r], &empty_config()).unwrap();
+        assert_eq!(
+            result.reminders[0].last_done,
+            Some(NaiveDate::from_ymd_opt(2026, 5, 11).unwrap())
+        );
+        assert_eq!(result.reminders[0].days_since, Some(1));
+        // interval=1, days_since=1 → due (1 >= 1)
+        assert!(result.reminders[0].due);
+    }
+
+    #[test]
+    fn evaluate_day_field_sleep_hours_match() {
+        let conn = make_test_db();
+        insert_day_field(&conn, "2026-05-12", "sleep_hours", "7.5");
+        let today = NaiveDate::from_ymd_opt(2026, 5, 12).unwrap();
+        let r = day_field_reminder("sleep_log", 1, DayColumn::SleepHours);
+        let result = evaluate(&conn, today, &[r], &empty_config()).unwrap();
+        assert_eq!(result.reminders[0].days_since, Some(0));
+        assert!(!result.reminders[0].due);
+    }
+
+    #[test]
+    fn evaluate_day_field_no_rows_is_due() {
+        let conn = make_test_db();
+        // A day row exists but `weight` is null.
+        insert_day(&conn, "2026-05-12");
+        let today = NaiveDate::from_ymd_opt(2026, 5, 12).unwrap();
+        let r = day_field_reminder("weigh_in", 1, DayColumn::Weight);
+        let result = evaluate(&conn, today, &[r], &empty_config()).unwrap();
+        assert_eq!(result.reminders[0].last_done, None);
+        assert!(result.reminders[0].due);
+    }
+
+    #[test]
+    fn evaluate_unknown_metric_target_emits_warning() {
+        let conn = make_test_db();
+        let today = NaiveDate::from_ymd_opt(2026, 5, 12).unwrap();
+        let r = metric_reminder("typoed", 1, "definitely_not_in_metrics");
+        let result = evaluate(&conn, today, &[r], &empty_config()).unwrap();
+        assert!(result.reminders[0].due);
+        assert!(
+            result
+                .warnings
+                .iter()
+                .any(|w| w.contains("definitely_not_in_metrics") && w.contains("typoed")),
+            "expected unknown-metric warning, got: {:?}",
+            result.warnings
+        );
+    }
+
+    #[test]
+    fn evaluate_unknown_metric_with_history_does_not_warn() {
+        // If the metric isn't in [metrics] but the DB has historical rows,
+        // suppress the warning — the user is likely watching legacy data.
+        let conn = make_test_db();
+        insert_metric(&conn, "2026-05-05", "legacy_metric", 1.0);
+        let today = NaiveDate::from_ymd_opt(2026, 5, 12).unwrap();
+        let r = metric_reminder("legacy", 1, "legacy_metric");
+        let result = evaluate(&conn, today, &[r], &empty_config()).unwrap();
+        assert!(result.warnings.is_empty(), "got: {:?}", result.warnings);
     }
 }
