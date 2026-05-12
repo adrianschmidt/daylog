@@ -96,6 +96,8 @@ pub struct Config {
     #[serde(default)]
     pub metrics: HashMap<String, MetricConfig>,
     #[serde(default)]
+    pub reminders: HashMap<String, ReminderConfig>,
+    #[serde(default)]
     pub notes: NotesConfig,
     #[serde(default = "default_toml_table")]
     pub climbing: toml::Value,
@@ -153,6 +155,16 @@ pub struct MetricConfig {
     pub color: String,
     #[serde(default)]
     pub unit: Option<String>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+pub struct ReminderConfig {
+    pub display: String,
+    pub interval_days: u32,
+    pub watch: String,
+    pub target: toml::Value,
+    #[serde(default)]
+    pub count_zero_as_logged: bool,
 }
 
 impl Config {
