@@ -1,3 +1,18 @@
+# [1.2.0](https://github.com/adrianschmidt/vitalog/compare/v1.1.0...v1.2.0) (2026-05-12)
+
+
+### Features
+
+* **reminders:** evaluate day_field watches; exhaustive match ([e086c2b](https://github.com/adrianschmidt/vitalog/commit/e086c2b296c190cfb68b6dbb3f33e9192f1b34a1))
+* **reminders:** evaluate lift watches with optional min filters ([2140afa](https://github.com/adrianschmidt/vitalog/commit/2140afab706cbb12ec326717512ea3d410d0c19a))
+* **reminders:** evaluate metric watches against the DB ([f363c38](https://github.com/adrianschmidt/vitalog/commit/f363c382338d8b07e4fc5aeecb52975fee6e2ec6))
+* **reminders:** evaluate session watches ([04ae65b](https://github.com/adrianschmidt/vitalog/commit/04ae65bd643b5ef3a7f1966ad51e7f9c78bd9f9d))
+* **reminders:** include reminders + reminder_warnings in status JSON ([feb4f0f](https://github.com/adrianschmidt/vitalog/commit/feb4f0fbe1388ec68f89f7a315368657b21bf551))
+* **reminders:** parse [reminders] config into Reminder values ([887e5d9](https://github.com/adrianschmidt/vitalog/commit/887e5d937841d611c586303fd3df96cba2b0ba13))
+* **reminders:** prepend due reminders block in `vitalog today` text ([3750ae5](https://github.com/adrianschmidt/vitalog/commit/3750ae5fbe77cc07b9106fe359726826eb743e2d))
+* **reminders:** reminders array + reminder_warnings in today --json ([398bf2f](https://github.com/adrianschmidt/vitalog/commit/398bf2f2ca926d5c5261024b57b99f60f2ba3a0c))
+* **reminders:** scaffold reminders module + Config field ([f647ff8](https://github.com/adrianschmidt/vitalog/commit/f647ff8d6cfd686704103c0fea1bf55826d29ef4))
+
 # [1.1.0](https://github.com/adrianschmidt/vitalog/compare/v1.0.4...v1.1.0) (2026-05-07)
 
 
