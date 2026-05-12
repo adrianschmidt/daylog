@@ -86,11 +86,26 @@ pub fn execute(date: Option<&str>, json: bool, config: &Config) -> Result<()> {
         }
     }
 
+    let reminders_defs = crate::reminders::load_reminders(config)?;
+    let reminder_eval = if reminders_defs.is_empty() {
+        crate::reminders::EvaluationResult::default()
+    } else {
+        let conn = crate::db::open_ro(&config.db_path())?;
+        crate::reminders::evaluate(&conn, date, &reminders_defs, config)?
+    };
+    for w in &reminder_eval.warnings {
+        summary.goals_warnings.push(w.clone());
+    }
+
     if json {
         let v = render_json(&summary, &goals);
         println!("{}", serde_json::to_string_pretty(&v)?);
     } else {
         let color = std::io::stdout().is_terminal() && std::env::var_os("NO_COLOR").is_none();
+        print!(
+            "{}",
+            render_reminders_block(&reminder_eval.reminders, color)
+        );
         print!("{}", render_text(&summary, &goals, color));
     }
     Ok(())
@@ -266,6 +281,51 @@ fn paint(color: bool, code: &str, body: &str) -> String {
     } else {
         body.to_string()
     }
+}
+
+/// Render the "Reminders" block to prepend above the daily summary.
+/// Returns `""` when no reminder is due — caller can append unconditionally.
+///
+/// Ordering: never-logged first, then by `days_since` descending (most
+/// overdue first). Stable for equal keys via the input order, which
+/// `reminders::load_reminders` already sorts alphabetically by id.
+pub fn render_reminders_block(
+    reminders: &[crate::reminders::EvaluatedReminder],
+    color: bool,
+) -> String {
+    let mut due: Vec<&crate::reminders::EvaluatedReminder> =
+        reminders.iter().filter(|r| r.due).collect();
+    if due.is_empty() {
+        return String::new();
+    }
+    due.sort_by(|a, b| match (a.days_since, b.days_since) {
+        (None, None) => std::cmp::Ordering::Equal,
+        (None, Some(_)) => std::cmp::Ordering::Less,
+        (Some(_), None) => std::cmp::Ordering::Greater,
+        (Some(x), Some(y)) => y.cmp(&x),
+    });
+
+    let mut out = String::new();
+    let header = paint(color, RED, "⏰ Reminders");
+    out.push_str(&header);
+    out.push('\n');
+    for r in due {
+        let line = match (r.days_since, r.last_done) {
+            (Some(n), Some(d)) => {
+                let plural = if n == 1 { "" } else { "s" };
+                format!(
+                    "- {} — overdue ({n} day{plural} ago, {})",
+                    r.display,
+                    d.format("%Y-%m-%d")
+                )
+            }
+            _ => format!("- {} — never logged", r.display),
+        };
+        out.push_str(&line);
+        out.push('\n');
+    }
+    out.push('\n');
+    out
 }
 
 /// Render the summary as a human-readable terminal block.
@@ -1188,6 +1248,205 @@ mod tests {
         assert_eq!(
             format_threshold_inline(&th(Some(1900.0), Some(2200.0), Some(2000.0)), "kcal"),
             "1900–2200 kcal (target 2000)"
+        );
+    }
+
+    use crate::reminders::EvaluatedReminder;
+
+    fn evald(
+        id: &str,
+        display: &str,
+        days_since: Option<i64>,
+        last_done: Option<NaiveDate>,
+        due: bool,
+        interval: u32,
+    ) -> EvaluatedReminder {
+        EvaluatedReminder {
+            id: id.into(),
+            display: display.into(),
+            interval_days: interval,
+            last_done,
+            days_since,
+            due,
+        }
+    }
+
+    #[test]
+    fn reminders_block_empty_when_nothing_due() {
+        let rs = vec![evald(
+            "a",
+            "A",
+            Some(0),
+            Some(NaiveDate::from_ymd_opt(2026, 5, 12).unwrap()),
+            false,
+            1,
+        )];
+        let block = render_reminders_block(&rs, false);
+        assert_eq!(block, "");
+    }
+
+    #[test]
+    fn reminders_block_empty_when_no_reminders() {
+        let block = render_reminders_block(&[], false);
+        assert_eq!(block, "");
+    }
+
+    #[test]
+    fn reminders_block_renders_due_lines_with_days_since() {
+        let rs = vec![
+            evald(
+                "lactic_acid",
+                "Lactic acid training",
+                Some(3),
+                Some(NaiveDate::from_ymd_opt(2026, 5, 9).unwrap()),
+                true,
+                2,
+            ),
+            evald("weigh_in", "Daily weigh-in", None, None, true, 1),
+        ];
+        let block = render_reminders_block(&rs, false);
+        assert!(block.contains("Reminders"), "got:\n{block}");
+        assert!(block.contains("Lactic acid training"), "got:\n{block}");
+        assert!(block.contains("3 days ago"), "got:\n{block}");
+        assert!(block.contains("2026-05-09"), "got:\n{block}");
+        assert!(block.contains("Daily weigh-in"), "got:\n{block}");
+        assert!(block.contains("never logged"), "got:\n{block}");
+        // Block ends with a blank line separator before the date header.
+        assert!(block.ends_with("\n\n"), "got:\n{block:?}");
+    }
+
+    #[test]
+    fn reminders_block_orders_most_overdue_first() {
+        let rs = vec![
+            evald(
+                "a",
+                "A two-day",
+                Some(2),
+                Some(NaiveDate::from_ymd_opt(2026, 5, 10).unwrap()),
+                true,
+                1,
+            ),
+            evald("b", "Never B", None, None, true, 1),
+            evald(
+                "c",
+                "C five-day",
+                Some(5),
+                Some(NaiveDate::from_ymd_opt(2026, 5, 7).unwrap()),
+                true,
+                1,
+            ),
+        ];
+        let block = render_reminders_block(&rs, false);
+        let lines: Vec<&str> = block.lines().filter(|l| l.starts_with("- ")).collect();
+        // never-logged ranks above any finite days_since; then descending
+        // by days_since.
+        assert!(lines[0].contains("Never B"), "got:\n{block}");
+        assert!(lines[1].contains("C five-day"), "got:\n{block}");
+        assert!(lines[2].contains("A two-day"), "got:\n{block}");
+    }
+
+    #[test]
+    fn reminders_block_skips_not_due_entries() {
+        let rs = vec![
+            evald(
+                "due",
+                "Due one",
+                Some(2),
+                Some(NaiveDate::from_ymd_opt(2026, 5, 10).unwrap()),
+                true,
+                1,
+            ),
+            evald(
+                "ok",
+                "Not due one",
+                Some(0),
+                Some(NaiveDate::from_ymd_opt(2026, 5, 12).unwrap()),
+                false,
+                1,
+            ),
+        ];
+        let block = render_reminders_block(&rs, false);
+        assert!(block.contains("Due one"), "got:\n{block}");
+        assert!(!block.contains("Not due one"), "got:\n{block}");
+    }
+
+    #[test]
+    fn reminders_block_color_on_emits_ansi() {
+        let rs = vec![evald(
+            "a",
+            "A",
+            Some(3),
+            Some(NaiveDate::from_ymd_opt(2026, 5, 9).unwrap()),
+            true,
+            2,
+        )];
+        let block = render_reminders_block(&rs, true);
+        assert!(
+            block.contains("\x1b["),
+            "expected ANSI codes, got:\n{block:?}"
+        );
+    }
+
+    #[test]
+    fn reminders_block_color_off_strips_ansi() {
+        let rs = vec![evald(
+            "a",
+            "A",
+            Some(3),
+            Some(NaiveDate::from_ymd_opt(2026, 5, 9).unwrap()),
+            true,
+            2,
+        )];
+        let block = render_reminders_block(&rs, false);
+        assert!(!block.contains("\x1b["), "got:\n{block:?}");
+    }
+
+    #[test]
+    fn execute_text_prepends_reminders_block_when_due() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let toml_str = format!(
+            r#"
+notes_dir = "{}"
+time_format = "24h"
+weight_unit = "kg"
+
+[metrics]
+la_min = {{ display = "Lactic acid (min)", color = "red" }}
+
+[reminders.lactic_acid]
+display = "Lactic acid training"
+interval_days = 2
+watch = "metric"
+target = "la_min"
+"#,
+            dir.path().display().to_string().replace('\\', "/")
+        );
+        let config: Config = toml::from_str(&toml_str).unwrap();
+
+        let registry = crate::modules::build_registry(&config);
+        let conn = db::open_rw(&config.db_path()).unwrap();
+        db::init_db(&conn, &registry).unwrap();
+        crate::modules::validate_module_tables(&registry).unwrap();
+        // Seed nothing — la_min has never been logged → reminder is due.
+
+        // Smoke: execute should not error and the rendered text (captured
+        // via the pure helper) should contain the reminder line above
+        // the date header.
+        let date = NaiveDate::from_ymd_opt(2026, 5, 12).unwrap();
+        let goals = crate::goals::load_goals(&config.notes_dir_path()).unwrap();
+        let summary = assemble(date, &config, &conn).unwrap();
+        let reminders = crate::reminders::load_reminders(&config).unwrap();
+        let eval = crate::reminders::evaluate(&conn, date, &reminders, &config).unwrap();
+
+        let mut out = render_reminders_block(&eval.reminders, false);
+        out.push_str(&render_text(&summary, &goals, false));
+        let header_idx = out
+            .find("2026-05-12 — Daily summary")
+            .expect("header present");
+        let block_idx = out.find("Lactic acid training").expect("reminder present");
+        assert!(
+            block_idx < header_idx,
+            "reminder block must precede summary; got:\n{out}"
         );
     }
 }
