@@ -8,7 +8,7 @@
 //!
 //! Sibling to `goals.rs`. No new DB schema, no daemon-side state.
 
-use chrono::NaiveDate;
+use chrono::{NaiveDate, NaiveTime};
 use color_eyre::eyre::Result;
 use rusqlite::Connection;
 
@@ -21,6 +21,8 @@ pub struct Reminder {
     pub display: String,
     pub interval_days: u32,
     pub watch: WatchSource,
+    pub not_before: Option<NaiveTime>,
+    pub not_after: Option<NaiveTime>,
 }
 
 /// What the reminder watches. Each variant maps to one prepared query in
@@ -132,6 +134,8 @@ pub struct EvaluatedReminder {
     pub last_done: Option<NaiveDate>,
     pub days_since: Option<i64>,
     pub due: bool,
+    pub not_before: Option<NaiveTime>,
+    pub not_after: Option<NaiveTime>,
 }
 
 /// Output of `evaluate`: evaluated reminders plus any soft warnings (e.g.
@@ -175,6 +179,8 @@ pub fn load_reminders(config: &Config) -> Result<Vec<Reminder>> {
             display: cfg.display.clone(),
             interval_days: cfg.interval_days,
             watch,
+            not_before: None,
+            not_after: None,
         });
     }
     out.sort_by(|a, b| a.id.cmp(&b.id));
@@ -408,6 +414,8 @@ pub fn evaluate(
             last_done,
             days_since,
             due,
+            not_before: None,
+            not_after: None,
         });
     }
     Ok(EvaluationResult {
@@ -884,6 +892,8 @@ target = "la_min"
                 id: metric.into(),
                 count_zero_as_logged: false,
             },
+            not_before: None,
+            not_after: None,
         }
     }
 
@@ -1019,6 +1029,8 @@ la_min = { display = "LA", color = "red" }
                 id: "la_min".into(),
                 count_zero_as_logged: true,
             },
+            not_before: None,
+            not_after: None,
         };
         let result = evaluate(&conn, today, &[reminder], &empty_config()).unwrap();
         assert_eq!(result.reminders[0].last_done, Some(today));
@@ -1054,6 +1066,8 @@ la_min = { display = "LA", color = "red" }
                 column,
                 value: value.into(),
             }),
+            not_before: None,
+            not_after: None,
         }
     }
 
@@ -1068,6 +1082,8 @@ la_min = { display = "LA", color = "red" }
             display: id.into(),
             interval_days: interval,
             watch: WatchSource::Session(SessionMatch::NumericAtLeast { column, min }),
+            not_before: None,
+            not_after: None,
         }
     }
 
@@ -1155,6 +1171,8 @@ la_min = { display = "LA", color = "red" }
                 min_weight,
                 min_reps,
             },
+            not_before: None,
+            not_after: None,
         }
     }
 
@@ -1224,6 +1242,8 @@ la_min = { display = "LA", color = "red" }
             display: id.into(),
             interval_days: interval,
             watch: WatchSource::DayField(col),
+            not_before: None,
+            not_after: None,
         }
     }
 

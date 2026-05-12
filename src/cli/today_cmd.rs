@@ -1293,6 +1293,8 @@ mod tests {
             last_done,
             days_since,
             due,
+            not_before: None,
+            not_after: None,
         }
     }
 
