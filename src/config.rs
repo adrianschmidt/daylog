@@ -165,6 +165,10 @@ pub struct ReminderConfig {
     pub target: toml::Value,
     #[serde(default)]
     pub count_zero_as_logged: bool,
+    #[serde(default)]
+    pub not_before: Option<String>,
+    #[serde(default)]
+    pub not_after: Option<String>,
 }
 
 impl Config {
