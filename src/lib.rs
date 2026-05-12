@@ -10,6 +10,7 @@ pub mod goals;
 pub mod legacy;
 pub mod materializer;
 pub mod modules;
+pub mod reminders;
 pub mod state;
 pub mod template;
 pub mod time;
