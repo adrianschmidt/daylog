@@ -435,6 +435,24 @@ fn query_last_done(conn: &Connection, watch: &WatchSource) -> Result<Option<Naiv
             )
             .wrap_err("Failed to query metrics for reminder")?
         }
+        WatchSource::Session(SessionMatch::TextEquals { column, value }) => {
+            let sql = format!(
+                "SELECT MAX(date) FROM sessions WHERE {} = ?1",
+                column.sql_column()
+            );
+            conn.query_row(&sql, [value], |row| row.get::<_, Option<String>>(0))
+                .wrap_err("Failed to query sessions for reminder (text-equals)")?
+        }
+        WatchSource::Session(SessionMatch::NumericAtLeast { column, min }) => {
+            let sql = format!(
+                "SELECT MAX(date) FROM sessions WHERE {col} IS NOT NULL AND {col} >= ?1",
+                col = column.sql_column()
+            );
+            conn.query_row(&sql, rusqlite::params![min], |row| {
+                row.get::<_, Option<String>>(0)
+            })
+            .wrap_err("Failed to query sessions for reminder (numeric-at-least)")?
+        }
         // Other variants are filled in by later tasks; for now they all
         // return None so we don't break the test scaffold.
         _ => None,
@@ -945,5 +963,103 @@ la_min = { display = "LA", color = "red" }
         let result = evaluate(&conn, today, &[reminder], &empty_config()).unwrap();
         assert_eq!(result.reminders[0].last_done, Some(today));
         assert!(!result.reminders[0].due);
+    }
+
+    fn insert_session(
+        conn: &Connection,
+        date: &str,
+        session_type: Option<&str>,
+        zone2_min: Option<i64>,
+    ) {
+        insert_day(conn, date);
+        conn.execute(
+            "INSERT INTO sessions(date, session_number, session_type, zone2_min) \
+             VALUES (?1, 1, ?2, ?3)",
+            rusqlite::params![date, session_type, zone2_min],
+        )
+        .unwrap();
+    }
+
+    fn session_text_reminder(
+        id: &str,
+        interval: u32,
+        column: SessionTextColumn,
+        value: &str,
+    ) -> Reminder {
+        Reminder {
+            id: id.into(),
+            display: id.into(),
+            interval_days: interval,
+            watch: WatchSource::Session(SessionMatch::TextEquals {
+                column,
+                value: value.into(),
+            }),
+        }
+    }
+
+    fn session_num_reminder(
+        id: &str,
+        interval: u32,
+        column: SessionNumColumn,
+        min: f64,
+    ) -> Reminder {
+        Reminder {
+            id: id.into(),
+            display: id.into(),
+            interval_days: interval,
+            watch: WatchSource::Session(SessionMatch::NumericAtLeast { column, min }),
+        }
+    }
+
+    #[test]
+    fn evaluate_session_text_equals_match() {
+        let conn = make_test_db();
+        insert_session(&conn, "2026-05-10", Some("vo2_max"), None);
+        insert_session(&conn, "2026-05-11", Some("zone2"), None);
+        let today = NaiveDate::from_ymd_opt(2026, 5, 12).unwrap();
+        let r = session_text_reminder("vo2", 7, SessionTextColumn::Type, "vo2_max");
+        let result = evaluate(&conn, today, &[r], &empty_config()).unwrap();
+        assert_eq!(
+            result.reminders[0].last_done,
+            Some(NaiveDate::from_ymd_opt(2026, 5, 10).unwrap())
+        );
+        assert!(!result.reminders[0].due);
+    }
+
+    #[test]
+    fn evaluate_session_text_equals_no_match_is_due() {
+        let conn = make_test_db();
+        insert_session(&conn, "2026-05-10", Some("zone2"), None);
+        let today = NaiveDate::from_ymd_opt(2026, 5, 12).unwrap();
+        let r = session_text_reminder("vo2", 7, SessionTextColumn::Type, "vo2_max");
+        let result = evaluate(&conn, today, &[r], &empty_config()).unwrap();
+        assert_eq!(result.reminders[0].last_done, None);
+        assert!(result.reminders[0].due);
+    }
+
+    #[test]
+    fn evaluate_session_numeric_at_least_match() {
+        let conn = make_test_db();
+        insert_session(&conn, "2026-05-09", None, Some(0));
+        insert_session(&conn, "2026-05-10", None, Some(30));
+        let today = NaiveDate::from_ymd_opt(2026, 5, 12).unwrap();
+        let r = session_num_reminder("zone2", 3, SessionNumColumn::ZoneTwoMin, 1.0);
+        let result = evaluate(&conn, today, &[r], &empty_config()).unwrap();
+        assert_eq!(
+            result.reminders[0].last_done,
+            Some(NaiveDate::from_ymd_opt(2026, 5, 10).unwrap())
+        );
+        assert!(!result.reminders[0].due);
+    }
+
+    #[test]
+    fn evaluate_session_numeric_below_threshold_not_counted() {
+        let conn = make_test_db();
+        insert_session(&conn, "2026-05-11", None, Some(15));
+        let today = NaiveDate::from_ymd_opt(2026, 5, 12).unwrap();
+        let r = session_num_reminder("zone2_long", 1, SessionNumColumn::ZoneTwoMin, 30.0);
+        let result = evaluate(&conn, today, &[r], &empty_config()).unwrap();
+        assert_eq!(result.reminders[0].last_done, None);
+        assert!(result.reminders[0].due);
     }
 }
