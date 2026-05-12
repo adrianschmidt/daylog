@@ -59,6 +59,15 @@ rdl = { display = "RDL", color = "red" }
 # `interval_days = N` means "fire if no matching row in the last N
 # calendar days" — so 2 = every other day, 1 = daily, 7 = weekly.
 #
+# Time-of-day gates (optional, both independently optional):
+#   - not_before = "HH:MM" — earliest wall-clock time the reminder may fire
+#   - not_after  = "HH:MM" — latest wall-clock time it may fire
+# When set, the reminder only counts as "due" inside the [not_before,
+# not_after] window — useful for evening-task reminders that shouldn't
+# nag at breakfast. Both fields are 24-hour. Overnight wrap-around is
+# rejected; for overnight reminders, split into two reminders on the
+# same metric, one with not_after, the other with not_before.
+#
 # [reminders.lactic_acid]
 # display       = "Lactic acid training"
 # interval_days = 2
@@ -88,3 +97,19 @@ rdl = { display = "RDL", color = "red" }
 # interval_days = 1
 # watch         = "day_field"
 # target        = "weight"
+#
+# [reminders.brush_evening]
+# display       = "Brush teeth (evening)"
+# interval_days = 1
+# not_before    = "18:00"
+# not_after     = "23:00"
+# watch         = "metric"
+# target        = "brushed_evening"
+#
+# [reminders.brush_morning]
+# display       = "Brush teeth (morning)"
+# interval_days = 1
+# not_before    = "07:00"
+# not_after     = "12:00"
+# watch         = "metric"
+# target        = "brushed_morning"

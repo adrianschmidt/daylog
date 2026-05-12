@@ -109,6 +109,18 @@ Each reminder picks one of four `watch` kinds:
 - **`lift`** — a row in `lift_sets`. Requires `exercise`; optional `min_weight` (lbs) and `min_reps` narrow the match.
 - **`day_field`** — one of `weight`, `sleep_hours`, `mood`, `energy`, `sleep_start`, `sleep_end`. Any non-null value counts as "logged".
 
+**Time-of-day gates.** Each reminder accepts optional `not_before` and `not_after` fields (24-hour `"HH:MM"`). When set, the reminder only counts as due inside the `[not_before, not_after]` window — so an evening-task reminder doesn't nag at breakfast. Both bounds are independently optional. For overnight reminders, split into two reminders on the same metric (one with `not_after`, the other with `not_before`) — explicit wrap-around windows are rejected at config-load.
+
+```toml
+[reminders.brush_evening]
+display       = "Brush teeth (evening)"
+interval_days = 1
+not_before    = "18:00"
+not_after     = "23:00"
+watch         = "metric"
+target        = "brushed_evening"
+```
+
 A reminder fires when the most recent matching date is either absent or at least `interval_days` calendar days before today (respecting `day_start_hour`). The block is silent when nothing is due. Both `vitalog today --json` and `vitalog status` always include a `reminders` array (every configured reminder, due or not) plus a `reminder_warnings` sibling — handy for piping into a notification script.
 
 ## CLI
