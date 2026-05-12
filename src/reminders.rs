@@ -453,6 +453,30 @@ fn query_last_done(conn: &Connection, watch: &WatchSource) -> Result<Option<Naiv
             })
             .wrap_err("Failed to query sessions for reminder (numeric-at-least)")?
         }
+        WatchSource::Lift {
+            exercise,
+            min_weight,
+            min_reps,
+        } => {
+            let mut sql = String::from("SELECT MAX(date) FROM lift_sets WHERE exercise = ?1");
+            // We bind params in order; build the SQL conditionally to match.
+            let mut params: Vec<rusqlite::types::Value> =
+                vec![rusqlite::types::Value::Text(exercise.clone())];
+            if let Some(w) = min_weight {
+                sql.push_str(&format!(" AND weight_lbs >= ?{}", params.len() + 1));
+                params.push(rusqlite::types::Value::Real(*w));
+            }
+            if let Some(r) = min_reps {
+                sql.push_str(&format!(" AND reps >= ?{}", params.len() + 1));
+                params.push(rusqlite::types::Value::Integer(*r as i64));
+            }
+            let params_refs: Vec<&dyn rusqlite::ToSql> =
+                params.iter().map(|v| v as &dyn rusqlite::ToSql).collect();
+            conn.query_row(&sql, params_refs.as_slice(), |row| {
+                row.get::<_, Option<String>>(0)
+            })
+            .wrap_err("Failed to query lift_sets for reminder")?
+        }
         // Other variants are filled in by later tasks; for now they all
         // return None so we don't break the test scaffold.
         _ => None,
@@ -1058,6 +1082,95 @@ la_min = { display = "LA", color = "red" }
         insert_session(&conn, "2026-05-11", None, Some(15));
         let today = NaiveDate::from_ymd_opt(2026, 5, 12).unwrap();
         let r = session_num_reminder("zone2_long", 1, SessionNumColumn::ZoneTwoMin, 30.0);
+        let result = evaluate(&conn, today, &[r], &empty_config()).unwrap();
+        assert_eq!(result.reminders[0].last_done, None);
+        assert!(result.reminders[0].due);
+    }
+
+    fn insert_lift(conn: &Connection, date: &str, exercise: &str, weight_lbs: f64, reps: i64) {
+        insert_day(conn, date);
+        conn.execute(
+            "INSERT INTO sessions(date, session_number) VALUES (?1, 1) \
+             ON CONFLICT(date, session_number) DO NOTHING",
+            [date],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO lift_sets(date, session_number, exercise, set_number, weight_lbs, reps) \
+             VALUES (?1, 1, ?2, 1, ?3, ?4)",
+            rusqlite::params![date, exercise, weight_lbs, reps],
+        )
+        .unwrap();
+    }
+
+    fn lift_reminder(
+        id: &str,
+        interval: u32,
+        exercise: &str,
+        min_weight: Option<f64>,
+        min_reps: Option<u32>,
+    ) -> Reminder {
+        Reminder {
+            id: id.into(),
+            display: id.into(),
+            interval_days: interval,
+            watch: WatchSource::Lift {
+                exercise: exercise.into(),
+                min_weight,
+                min_reps,
+            },
+        }
+    }
+
+    #[test]
+    fn evaluate_lift_exercise_only() {
+        let conn = make_test_db();
+        insert_lift(&conn, "2026-05-09", "deadlift", 200.0, 5);
+        insert_lift(&conn, "2026-05-11", "squat", 185.0, 5);
+        let today = NaiveDate::from_ymd_opt(2026, 5, 12).unwrap();
+        let r = lift_reminder("deads", 3, "deadlift", None, None);
+        let result = evaluate(&conn, today, &[r], &empty_config()).unwrap();
+        assert_eq!(
+            result.reminders[0].last_done,
+            Some(NaiveDate::from_ymd_opt(2026, 5, 9).unwrap())
+        );
+        assert!(result.reminders[0].due);
+    }
+
+    #[test]
+    fn evaluate_lift_with_min_weight_excludes_lighter_sets() {
+        let conn = make_test_db();
+        insert_lift(&conn, "2026-05-09", "deadlift", 200.0, 5);
+        insert_lift(&conn, "2026-05-11", "deadlift", 135.0, 5);
+        let today = NaiveDate::from_ymd_opt(2026, 5, 12).unwrap();
+        let r = lift_reminder("heavy_deads", 7, "deadlift", Some(180.0), None);
+        let result = evaluate(&conn, today, &[r], &empty_config()).unwrap();
+        assert_eq!(
+            result.reminders[0].last_done,
+            Some(NaiveDate::from_ymd_opt(2026, 5, 9).unwrap())
+        );
+    }
+
+    #[test]
+    fn evaluate_lift_with_min_reps_excludes_shorter_sets() {
+        let conn = make_test_db();
+        insert_lift(&conn, "2026-05-09", "deadlift", 200.0, 5);
+        insert_lift(&conn, "2026-05-11", "deadlift", 250.0, 2);
+        let today = NaiveDate::from_ymd_opt(2026, 5, 12).unwrap();
+        let r = lift_reminder("deads_for_reps", 7, "deadlift", None, Some(4));
+        let result = evaluate(&conn, today, &[r], &empty_config()).unwrap();
+        assert_eq!(
+            result.reminders[0].last_done,
+            Some(NaiveDate::from_ymd_opt(2026, 5, 9).unwrap())
+        );
+    }
+
+    #[test]
+    fn evaluate_lift_no_match_is_due() {
+        let conn = make_test_db();
+        insert_lift(&conn, "2026-05-09", "squat", 185.0, 5);
+        let today = NaiveDate::from_ymd_opt(2026, 5, 12).unwrap();
+        let r = lift_reminder("deads", 3, "deadlift", None, None);
         let result = evaluate(&conn, today, &[r], &empty_config()).unwrap();
         assert_eq!(result.reminders[0].last_done, None);
         assert!(result.reminders[0].due);
