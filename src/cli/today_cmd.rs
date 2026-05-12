@@ -1496,6 +1496,46 @@ mod tests {
     }
 
     #[test]
+    fn render_json_includes_not_before_and_not_after() {
+        let s = fixture_summary();
+        let g = fixture_goals();
+        let rs = vec![EvaluatedReminder {
+            id: "evening".into(),
+            display: "Evening".into(),
+            interval_days: 1,
+            last_done: None,
+            days_since: None,
+            due: false,
+            not_before: Some(chrono::NaiveTime::from_hms_opt(18, 0, 0).unwrap()),
+            not_after: Some(chrono::NaiveTime::from_hms_opt(23, 0, 0).unwrap()),
+        }];
+        let v = render_json_with_reminders(&s, &g, &rs, &[]);
+        let r = &v["reminders"][0];
+        assert_eq!(r["not_before"], "18:00");
+        assert_eq!(r["not_after"], "23:00");
+    }
+
+    #[test]
+    fn render_json_omits_time_gates_as_null_when_unset() {
+        let s = fixture_summary();
+        let g = fixture_goals();
+        let rs = vec![EvaluatedReminder {
+            id: "all_day".into(),
+            display: "All day".into(),
+            interval_days: 1,
+            last_done: None,
+            days_since: None,
+            due: true,
+            not_before: None,
+            not_after: None,
+        }];
+        let v = render_json_with_reminders(&s, &g, &rs, &[]);
+        let r = &v["reminders"][0];
+        assert!(r["not_before"].is_null());
+        assert!(r["not_after"].is_null());
+    }
+
+    #[test]
     fn render_json_includes_reminder_warnings() {
         let s = fixture_summary();
         let g = fixture_goals();

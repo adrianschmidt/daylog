@@ -173,4 +173,25 @@ target = "nonexistent"
         assert_eq!(warns.len(), 1);
         assert!(warns[0].as_str().unwrap().contains("nonexistent"));
     }
+
+    #[test]
+    fn status_json_includes_time_gates_for_each_reminder() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let config = config_in(
+            dir.path(),
+            r#"
+[reminders.evening]
+display = "Evening"
+interval_days = 1
+watch = "metric"
+target = "la_min"
+not_before = "18:00"
+not_after = "23:00"
+"#,
+        );
+        let v = build_status_json(&config).unwrap();
+        let r = &v["reminders"][0];
+        assert_eq!(r["not_before"], "18:00");
+        assert_eq!(r["not_after"], "23:00");
+    }
 }

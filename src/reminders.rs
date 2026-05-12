@@ -583,6 +583,8 @@ pub fn to_json(
                 "last_done": r.last_done.map(|d| d.format("%Y-%m-%d").to_string()),
                 "days_since": r.days_since,
                 "due": r.due,
+                "not_before": r.not_before.map(|t| t.format("%H:%M").to_string()),
+                "not_after": r.not_after.map(|t| t.format("%H:%M").to_string()),
             })
         })
         .collect();
