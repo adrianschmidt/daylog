@@ -1,3 +1,14 @@
+# [1.3.0](https://github.com/adrianschmidt/vitalog/compare/v1.2.0...v1.3.0) (2026-05-13)
+
+
+### Features
+
+* **reminders:** apply time gate inside `evaluate` ([34a4db7](https://github.com/adrianschmidt/vitalog/commit/34a4db713e200cdf4b4f98d70771da5a3eff7ca0))
+* **reminders:** expose not_before / not_after in JSON output ([f087ded](https://github.com/adrianschmidt/vitalog/commit/f087ded23271985a18b23dd4981d7592bdafc6cf))
+* **reminders:** parse + validate not_before / not_after ([21da846](https://github.com/adrianschmidt/vitalog/commit/21da846a62db1c68dd7cc7f4bdd91769b813375f))
+* **reminders:** scaffold not_before / not_after fields on types ([f718829](https://github.com/adrianschmidt/vitalog/commit/f718829685eb9d8210dc247f3db2a38a41eff824))
+* **reminders:** within_time_window helper with day_start_hour awareness ([a34a33f](https://github.com/adrianschmidt/vitalog/commit/a34a33f5317f23dda99d7c21f45b35701cdb7a7f))
+
 # [1.2.0](https://github.com/adrianschmidt/vitalog/compare/v1.1.0...v1.2.0) (2026-05-12)
 
 
