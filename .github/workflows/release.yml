@@ -19,12 +19,12 @@ jobs:
       version: ${{ steps.semrel.outputs.new_release_version }}
       published: ${{ steps.semrel.outputs.new_release_published }}
     steps:
-      - uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547  # v1
+      - uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349  # v2.2.2
         id: app-token
         with:
           app-id: ${{ secrets.APP_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5.0.1
         with:
           fetch-depth: 0
           token: ${{ steps.app-token.outputs.token }}
@@ -47,7 +47,7 @@ jobs:
     permissions:
       contents: read
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5.0.1
         with:
           fetch-depth: 1
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
@@ -56,7 +56,7 @@ jobs:
         run: scripts/bump-cargo.sh ${{ needs.analyze.outputs.version }}
       - name: Tar bumped manifest + lock
         run: tar czf bumped-workspace.tar.gz Cargo.toml Cargo.lock
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4  # v5.0.0
         with:
           name: bumped-workspace
           path: bumped-workspace.tar.gz
@@ -88,8 +88,8 @@ jobs:
             binary: vitalog.exe
             archive: zip
     steps:
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5.0.1
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0  # v5.0.0
         with:
           name: bumped-workspace
       - name: Apply bumped manifest + lock
@@ -111,7 +111,7 @@ jobs:
         run: |
           cd target/${{ matrix.target }}/release
           7z a ../../../vitalog-${{ matrix.target }}.zip ${{ matrix.binary }}
-      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
+      - uses: actions/upload-artifact@330a01c490aca151604b8cf639adc76d48f6c5d4  # v5.0.0
         with:
           name: vitalog-${{ matrix.target }}
           path: vitalog-${{ matrix.target }}.*
@@ -126,20 +126,20 @@ jobs:
       issues: write
       pull-requests: write
     steps:
-      - uses: actions/create-github-app-token@d72941d797fd3113feb6b93fd0dec494b13a2547  # v1
+      - uses: actions/create-github-app-token@fee1f7d63c2ff003460e3d139729b119787bc349  # v2.2.2
         id: app-token
         with:
           app-id: ${{ secrets.APP_ID }}
           private-key: ${{ secrets.APP_PRIVATE_KEY }}
-      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd  # v5.0.1
         with:
           fetch-depth: 0
           token: ${{ steps.app-token.outputs.token }}
       - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8  # stable
-      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020  # v4
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444  # v5.0.0
         with:
           node-version: lts/*
-      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
+      - uses: actions/download-artifact@634f93cb2916e3fdff6788551b99b062d0335ce0  # v5.0.0
         with:
           path: dist
       - uses: cycjimmy/semantic-release-action@b12c8f6015dc215fe37bc154d4ad456dd3833c90  # v6.0.0
