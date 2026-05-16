@@ -1,3 +1,10 @@
+## [1.3.1](https://github.com/adrianschmidt/vitalog/compare/v1.3.0...v1.3.1) (2026-05-16)
+
+
+### Bug Fixes
+
+* **bp:** classify pre-day_start_hour readings as evening ([#34](https://github.com/adrianschmidt/vitalog/issues/34)) ([8c89928](https://github.com/adrianschmidt/vitalog/commit/8c8992859e3406d2f7d068797adbab7d4fa8cf35))
+
 # [1.3.0](https://github.com/adrianschmidt/vitalog/compare/v1.2.0...v1.3.0) (2026-05-13)
 
 
