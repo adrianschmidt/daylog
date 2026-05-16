@@ -9,8 +9,10 @@ use crate::config::Config;
 use crate::frontmatter;
 use crate::time;
 
-/// Morning/evening cutoff: time-of-measurement < 14:00 → morning,
-/// otherwise evening. `--morning` and `--evening` flags override.
+/// Morning/evening cutoff: time-of-measurement in [day_start_hour, 14:00) →
+/// morning; otherwise evening. `--morning` and `--evening` flags override.
+/// Times before `day_start_hour` are late-night of the *previous* effective
+/// day and classify as evening (issue #34).
 const MORNING_CUTOFF_HOUR: u32 = 14;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -38,7 +40,7 @@ impl std::fmt::Display for Slot {
 }
 
 /// Decide the slot from explicit flags or the measurement time.
-pub fn pick_slot(morning: bool, evening: bool, when: NaiveTime) -> Slot {
+pub fn pick_slot(morning: bool, evening: bool, when: NaiveTime, day_start_hour: u8) -> Slot {
     if morning {
         return Slot::Morning;
     }
@@ -46,7 +48,11 @@ pub fn pick_slot(morning: bool, evening: bool, when: NaiveTime) -> Slot {
         return Slot::Evening;
     }
     use chrono::Timelike;
-    if when.hour() < MORNING_CUTOFF_HOUR {
+    let hour = when.hour();
+    if hour < u32::from(day_start_hour) {
+        return Slot::Evening;
+    }
+    if hour < MORNING_CUTOFF_HOUR {
         Slot::Morning
     } else {
         Slot::Evening
@@ -74,7 +80,7 @@ pub fn execute(
     let date = resolve::target_date(date_flag, config)?;
     let date_str = date.format("%Y-%m-%d").to_string();
     let when = resolve::target_time(time_flag)?;
-    let slot = pick_slot(morning, evening, when);
+    let slot = pick_slot(morning, evening, when, config.day_start_hour);
 
     validate_or_warn(sys, dia, pulse);
 
@@ -135,6 +141,14 @@ mod tests {
         toml::from_str(&toml_str).unwrap()
     }
 
+    fn config_in_with_day_start(notes_dir: &Path, fmt: &str, day_start_hour: u8) -> Config {
+        let toml_str = format!(
+            "notes_dir = '{}'\ntime_format = '{fmt}'\nday_start_hour = {day_start_hour}\n",
+            notes_dir.display().to_string().replace('\\', "/")
+        );
+        toml::from_str(&toml_str).unwrap()
+    }
+
     fn read_today(notes_dir: &Path, config: &Config) -> String {
         let date = config.effective_today();
         std::fs::read_to_string(notes_dir.join(format!("{date}.md"))).unwrap()
@@ -144,22 +158,40 @@ mod tests {
 
     #[test]
     fn slot_auto_morning_before_14() {
-        assert_eq!(pick_slot(false, false, t(13, 59)), Slot::Morning);
-        assert_eq!(pick_slot(false, false, t(7, 30)), Slot::Morning);
-        assert_eq!(pick_slot(false, false, t(0, 0)), Slot::Morning);
+        assert_eq!(pick_slot(false, false, t(13, 59), 0), Slot::Morning);
+        assert_eq!(pick_slot(false, false, t(7, 30), 0), Slot::Morning);
+        assert_eq!(pick_slot(false, false, t(0, 0), 0), Slot::Morning);
     }
 
     #[test]
     fn slot_auto_evening_at_14_and_after() {
-        assert_eq!(pick_slot(false, false, t(14, 0)), Slot::Evening);
-        assert_eq!(pick_slot(false, false, t(20, 30)), Slot::Evening);
-        assert_eq!(pick_slot(false, false, t(23, 59)), Slot::Evening);
+        assert_eq!(pick_slot(false, false, t(14, 0), 0), Slot::Evening);
+        assert_eq!(pick_slot(false, false, t(20, 30), 0), Slot::Evening);
+        assert_eq!(pick_slot(false, false, t(23, 59), 0), Slot::Evening);
     }
 
     #[test]
     fn slot_explicit_flags_override_time() {
-        assert_eq!(pick_slot(true, false, t(20, 0)), Slot::Morning);
-        assert_eq!(pick_slot(false, true, t(7, 0)), Slot::Evening);
+        assert_eq!(pick_slot(true, false, t(20, 0), 0), Slot::Morning);
+        assert_eq!(pick_slot(false, true, t(7, 0), 0), Slot::Evening);
+    }
+
+    #[test]
+    fn slot_auto_evening_for_late_night_before_day_start() {
+        // With day_start_hour=4, [00:00, 04:00) is the late-night window
+        // of the *previous* effective day — classify as evening so it
+        // doesn't clobber the morning frontmatter (issue #34).
+        assert_eq!(pick_slot(false, false, t(0, 0), 4), Slot::Evening);
+        assert_eq!(pick_slot(false, false, t(0, 34), 4), Slot::Evening);
+        assert_eq!(pick_slot(false, false, t(3, 59), 4), Slot::Evening);
+    }
+
+    #[test]
+    fn slot_auto_morning_at_and_after_day_start() {
+        // With day_start_hour=4, times in [04:00, 14:00) → morning as before.
+        assert_eq!(pick_slot(false, false, t(4, 0), 4), Slot::Morning);
+        assert_eq!(pick_slot(false, false, t(7, 30), 4), Slot::Morning);
+        assert_eq!(pick_slot(false, false, t(13, 59), 4), Slot::Morning);
     }
 
     // --- end-to-end via execute ---
@@ -327,6 +359,66 @@ mod tests {
         let note = std::fs::read_to_string(&path).unwrap();
         assert!(note.contains("bp_morning_sys: 141"));
         assert!(note.contains("- **07:30** BP: 141/96, pulse 70 bpm"));
+    }
+
+    #[test]
+    fn late_night_reading_with_day_start_hour_4_does_not_clobber_morning() {
+        // Issue #34: with day_start_hour=4, a 00:34 BP entry attributed
+        // to the previous effective day must classify as evening, not
+        // morning — otherwise it overwrites the actual morning reading.
+        let dir = tempfile::TempDir::new().unwrap();
+        let config = config_in_with_day_start(dir.path(), "24h", 4);
+
+        execute(
+            137,
+            86,
+            57,
+            false,
+            false,
+            Some("2026-05-15"),
+            Some("08:28"),
+            &config,
+            true,
+        )
+        .unwrap();
+        execute(
+            132,
+            72,
+            56,
+            false,
+            false,
+            Some("2026-05-15"),
+            Some("00:34"),
+            &config,
+            true,
+        )
+        .unwrap();
+
+        let note = std::fs::read_to_string(dir.path().join("2026-05-15.md")).unwrap();
+        assert!(
+            note.contains("bp_morning_sys: 137"),
+            "morning sys was clobbered:\n{note}"
+        );
+        assert!(
+            note.contains("bp_morning_dia: 86"),
+            "morning dia was clobbered:\n{note}"
+        );
+        assert!(
+            note.contains("bp_morning_pulse: 57"),
+            "morning pulse was clobbered:\n{note}"
+        );
+        assert!(
+            note.contains("bp_evening_sys: 132"),
+            "evening sys not written:\n{note}"
+        );
+        assert!(
+            note.contains("bp_evening_dia: 72"),
+            "evening dia not written:\n{note}"
+        );
+        assert!(
+            note.contains("bp_evening_pulse: 56"),
+            "evening pulse not written:\n{note}"
+        );
     }
 
     #[test]
