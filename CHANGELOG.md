@@ -1,3 +1,10 @@
+## [1.3.2](https://github.com/adrianschmidt/vitalog/compare/v1.3.1...v1.3.2) (2026-05-17)
+
+
+### Bug Fixes
+
+* **today:** suppress duplicate BP custom-metric rows + add evening composite ([896dd8e](https://github.com/adrianschmidt/vitalog/commit/896dd8ee7b81085ef43c9420c111b180ba98ff64))
+
 ## [1.3.1](https://github.com/adrianschmidt/vitalog/compare/v1.3.0...v1.3.1) (2026-05-16)
 
 
