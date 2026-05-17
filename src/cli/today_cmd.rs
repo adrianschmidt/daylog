@@ -47,6 +47,7 @@ pub struct DaySummary {
     /// day with a weight exists.
     pub weight_delta: Option<(f64, NaiveDate)>,
     pub bp_morning: Option<BpReading>,
+    pub bp_evening: Option<BpReading>,
     pub custom_metrics: Vec<CustomMetric>,
     pub goals_warnings: Vec<String>,
     pub weight_unit: WeightUnit,
@@ -167,8 +168,9 @@ pub fn assemble(date: NaiveDate, config: &Config, conn: &Connection) -> Result<D
     // 3. Weight delta vs previous logged day (look back 60 days).
     let weight_delta = compute_weight_delta(conn, date, &day);
 
-    // 4. BP morning — extract from YAML frontmatter (not in DB).
-    let bp_morning = parse_bp_morning(&note_content);
+    // 4. BP morning / evening — extract from YAML frontmatter (not in DB).
+    let bp_morning = parse_bp_reading(&note_content, "bp_morning");
+    let bp_evening = parse_bp_reading(&note_content, "bp_evening");
 
     // 5. Custom metrics from [metrics] config.
     let custom_metrics = load_custom_metrics(conn, &date_str, config)?;
@@ -179,6 +181,7 @@ pub fn assemble(date: NaiveDate, config: &Config, conn: &Connection) -> Result<D
         day,
         weight_delta,
         bp_morning,
+        bp_evening,
         custom_metrics,
         goals_warnings: vec![], // populated by execute() after loading goals
         weight_unit: config.weight_unit,
@@ -224,7 +227,10 @@ fn compute_weight_delta(
     None
 }
 
-fn parse_bp_morning(content: &str) -> Option<BpReading> {
+/// Read sys/dia/pulse from a YAML map under `{prefix}_sys` /
+/// `{prefix}_dia` / `{prefix}_pulse`. Returns `None` if any of the three
+/// is missing or the frontmatter cannot be parsed.
+fn parse_bp_reading(content: &str, prefix: &str) -> Option<BpReading> {
     let yaml_str = extract_frontmatter_str(content)?;
     let docs = YamlLoader::load_from_str(yaml_str).ok()?;
     let doc = docs.into_iter().next()?;
@@ -239,9 +245,9 @@ fn parse_bp_morning(content: &str) -> Option<BpReading> {
             .map(|i| i as i32)
     };
     Some(BpReading {
-        sys: get_int("bp_morning_sys")?,
-        dia: get_int("bp_morning_dia")?,
-        pulse: get_int("bp_morning_pulse")?,
+        sys: get_int(&format!("{prefix}_sys"))?,
+        dia: get_int(&format!("{prefix}_dia"))?,
+        pulse: get_int(&format!("{prefix}_pulse"))?,
     })
 }
 
@@ -257,6 +263,19 @@ fn extract_frontmatter_str(content: &str) -> Option<&str> {
     Some(&body[..close])
 }
 
+/// BP YAML keys whose values are already surfaced by the composite "BP
+/// morning:" / "BP evening:" rows. When users register these as custom
+/// metrics in `[metrics]` (so they can chart trends or set goals), we
+/// suppress the duplicate per-component rows. See issue #20.
+const BP_COMPOSITE_KEYS: &[&str] = &[
+    "bp_morning_sys",
+    "bp_morning_dia",
+    "bp_morning_pulse",
+    "bp_evening_sys",
+    "bp_evening_dia",
+    "bp_evening_pulse",
+];
+
 fn load_custom_metrics(
     conn: &Connection,
     date_str: &str,
@@ -271,6 +290,7 @@ fn load_custom_metrics(
     let mut out: Vec<CustomMetric> = config
         .metrics
         .iter()
+        .filter(|(id, _)| !BP_COMPOSITE_KEYS.contains(&id.as_str()))
         .map(|(id, cfg)| CustomMetric {
             id: id.clone(),
             display: cfg.display.clone(),
@@ -383,7 +403,8 @@ pub fn render_text(summary: &DaySummary, goals: &Goals, color: bool) -> String {
         color,
     ));
     out.push_str(&render_sleep_row(summary, color));
-    out.push_str(&render_bp_row(summary, color));
+    out.push_str(&render_bp_row("BP morning:  ", &summary.bp_morning, color));
+    out.push_str(&render_bp_row("BP evening:  ", &summary.bp_evening, color));
 
     // --- Custom metrics ---
     for m in &summary.custom_metrics {
@@ -560,10 +581,10 @@ fn render_sleep_row(summary: &DaySummary, color: bool) -> String {
     }
 }
 
-fn render_bp_row(summary: &DaySummary, color: bool) -> String {
-    match &summary.bp_morning {
-        Some(b) => format!("BP morning:   {}/{} (pulse {})\n", b.sys, b.dia, b.pulse),
-        None => format!("BP morning:   {}\n", paint(color, DIM, "not logged")),
+fn render_bp_row(label: &str, reading: &Option<BpReading>, color: bool) -> String {
+    match reading {
+        Some(b) => format!("{label} {}/{} (pulse {})\n", b.sys, b.dia, b.pulse),
+        None => format!("{label} {}\n", paint(color, DIM, "not logged")),
     }
 }
 
@@ -671,10 +692,12 @@ pub fn render_json(summary: &DaySummary, goals: &Goals) -> serde_json::Value {
         _ => serde_json::Value::Null,
     };
 
-    let bp = match &summary.bp_morning {
+    let bp_json = |r: &Option<BpReading>| match r {
         Some(b) => serde_json::json!({ "sys": b.sys, "dia": b.dia, "pulse": b.pulse }),
         None => serde_json::Value::Null,
     };
+    let bp_morning = bp_json(&summary.bp_morning);
+    let bp_evening = bp_json(&summary.bp_evening);
 
     // Warnings: collected from food.skipped_lines + goals_warnings.
     let mut warnings: Vec<serde_json::Value> = summary
@@ -698,7 +721,8 @@ pub fn render_json(summary: &DaySummary, goals: &Goals) -> serde_json::Value {
         "date": summary.date.format("%Y-%m-%d").to_string(),
         "metrics": serde_json::Value::Object(metrics),
         "sleep": sleep,
-        "bp_morning": bp,
+        "bp_morning": bp_morning,
+        "bp_evening": bp_evening,
         "goals_present": goals.present,
         "warnings": warnings,
     })
@@ -782,6 +806,7 @@ mod tests {
             },
             weight_delta: Some((1.3, NaiveDate::from_ymd_opt(2026, 4, 29).unwrap())),
             bp_morning: None,
+            bp_evening: None,
             custom_metrics: vec![],
             goals_warnings: vec![],
             weight_unit: WeightUnit::Kg,
@@ -851,7 +876,38 @@ mod tests {
         assert!(out.contains("Δ +1.3 vs yesterday"), "got:\n{out}");
         assert!(out.contains("Sleep:     6h 24min"), "got:\n{out}");
         assert!(out.contains("BP morning:"), "got:\n{out}");
+        assert!(out.contains("BP evening:"), "got:\n{out}");
         assert!(out.contains("not logged"), "got:\n{out}");
+    }
+
+    #[test]
+    fn render_text_bp_evening_row_with_values() {
+        let mut s = fixture_summary();
+        s.bp_evening = Some(BpReading {
+            sys: 132,
+            dia: 82,
+            pulse: 65,
+        });
+        let g = fixture_goals();
+        let out = render_text(&s, &g, false);
+        let line = out
+            .lines()
+            .find(|l| l.starts_with("BP evening:"))
+            .expect("BP evening row missing");
+        assert!(line.contains("132/82"), "got: {line}");
+        assert!(line.contains("pulse 65"), "got: {line}");
+    }
+
+    #[test]
+    fn render_text_bp_evening_row_not_logged_when_missing() {
+        let s = fixture_summary(); // bp_evening = None
+        let g = fixture_goals();
+        let out = render_text(&s, &g, false);
+        let line = out
+            .lines()
+            .find(|l| l.starts_with("BP evening:"))
+            .expect("BP evening row missing");
+        assert!(line.contains("not logged"), "got: {line}");
     }
 
     #[test]
@@ -1016,11 +1072,27 @@ mod tests {
         assert_eq!(v["metrics"]["weight"]["delta"], 1.3);
         assert_eq!(v["metrics"]["weight"]["delta_vs_date"], "2026-04-29");
         assert!(v["bp_morning"].is_null());
+        assert!(v["bp_evening"].is_null());
         assert_eq!(v["sleep"]["hours"], 6.4);
         assert_eq!(v["sleep"]["start"], "23:00");
         assert_eq!(v["sleep"]["end"], "05:24");
         assert_eq!(v["goals_present"], true);
         assert!(v["warnings"].as_array().unwrap().is_empty());
+    }
+
+    #[test]
+    fn render_json_bp_evening_present_when_set() {
+        let mut s = fixture_summary();
+        s.bp_evening = Some(BpReading {
+            sys: 130,
+            dia: 80,
+            pulse: 62,
+        });
+        let g = fixture_goals();
+        let v = render_json(&s, &g);
+        assert_eq!(v["bp_evening"]["sys"], 130);
+        assert_eq!(v["bp_evening"]["dia"], 80);
+        assert_eq!(v["bp_evening"]["pulse"], 62);
     }
 
     #[test]
@@ -1124,6 +1196,107 @@ mod tests {
     }
 
     #[test]
+    fn assemble_parses_bp_evening_from_yaml() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let config = config_in(dir.path());
+
+        let date = "2026-04-30";
+        let note = format!(
+            "---\n\
+             date: {date}\n\
+             bp_evening_sys: 132\n\
+             bp_evening_dia: 82\n\
+             bp_evening_pulse: 65\n\
+             ---\n"
+        );
+        std::fs::write(dir.path().join(format!("{date}.md")), note).unwrap();
+
+        let registry = crate::modules::build_registry(&config);
+        let conn = db::open_rw(&config.db_path()).unwrap();
+        db::init_db(&conn, &registry).unwrap();
+        crate::modules::validate_module_tables(&registry).unwrap();
+        crate::materializer::sync_all(&conn, &config.notes_dir_path(), &config, &registry).unwrap();
+
+        let target = NaiveDate::from_ymd_opt(2026, 4, 30).unwrap();
+        let summary = assemble(target, &config, &conn).unwrap();
+
+        let bp = summary.bp_evening.expect("bp_evening should be parsed");
+        assert_eq!(bp.sys, 132);
+        assert_eq!(bp.dia, 82);
+        assert_eq!(bp.pulse, 65);
+    }
+
+    /// Regression for vitalog#20: when a user registers `bp_morning_*` or
+    /// `bp_evening_*` as custom metrics, the composite "BP morning:" /
+    /// "BP evening:" rows already cover those values, so the duplicated
+    /// custom-metric rows must be suppressed.
+    #[test]
+    fn assemble_filters_bp_keys_from_custom_metrics() {
+        let dir = tempfile::TempDir::new().unwrap();
+        let toml_str = format!(
+            "notes_dir = '{}'\ntime_format = '24h'\nweight_unit = 'kg'\n\
+             [metrics]\n\
+             bp_morning_sys = {{ display = \"BP AM Sys\", color = \"red\", unit = \"mmHg\" }}\n\
+             bp_morning_dia = {{ display = \"BP AM Dia\", color = \"red\", unit = \"mmHg\" }}\n\
+             bp_morning_pulse = {{ display = \"BP AM Pulse\", color = \"red\", unit = \"bpm\" }}\n\
+             bp_evening_sys = {{ display = \"BP PM Sys\", color = \"magenta\", unit = \"mmHg\" }}\n\
+             bp_evening_dia = {{ display = \"BP PM Dia\", color = \"magenta\", unit = \"mmHg\" }}\n\
+             bp_evening_pulse = {{ display = \"BP PM Pulse\", color = \"magenta\", unit = \"bpm\" }}\n\
+             other_metric = {{ display = \"Other\", color = \"green\" }}\n",
+            dir.path().display().to_string().replace('\\', "/")
+        );
+        let config: Config = toml::from_str(&toml_str).unwrap();
+
+        let date = "2026-04-30";
+        let note = format!(
+            "---\n\
+             date: {date}\n\
+             bp_morning_sys: 138\n\
+             bp_morning_dia: 88\n\
+             bp_morning_pulse: 70\n\
+             bp_evening_sys: 132\n\
+             bp_evening_dia: 82\n\
+             bp_evening_pulse: 65\n\
+             other_metric: 42\n\
+             ---\n"
+        );
+        std::fs::write(dir.path().join(format!("{date}.md")), note).unwrap();
+
+        let registry = crate::modules::build_registry(&config);
+        let conn = db::open_rw(&config.db_path()).unwrap();
+        db::init_db(&conn, &registry).unwrap();
+        crate::modules::validate_module_tables(&registry).unwrap();
+        crate::materializer::sync_all(&conn, &config.notes_dir_path(), &config, &registry).unwrap();
+
+        let target = NaiveDate::from_ymd_opt(2026, 4, 30).unwrap();
+        let summary = assemble(target, &config, &conn).unwrap();
+
+        let ids: Vec<&str> = summary
+            .custom_metrics
+            .iter()
+            .map(|m| m.id.as_str())
+            .collect();
+        for bp_key in [
+            "bp_morning_sys",
+            "bp_morning_dia",
+            "bp_morning_pulse",
+            "bp_evening_sys",
+            "bp_evening_dia",
+            "bp_evening_pulse",
+        ] {
+            assert!(
+                !ids.contains(&bp_key),
+                "BP key `{bp_key}` should be filtered from custom_metrics (composite row covers it); got ids: {ids:?}"
+            );
+        }
+        // Non-BP custom metrics are still passed through.
+        assert!(
+            ids.contains(&"other_metric"),
+            "non-BP custom metrics should remain; got ids: {ids:?}"
+        );
+    }
+
+    #[test]
     fn assemble_weight_delta_uses_previous_logged_day() {
         let dir = tempfile::TempDir::new().unwrap();
         let config = config_in(dir.path());
@@ -1161,6 +1334,33 @@ mod tests {
         assert_eq!(summary.food, FoodTotals::default());
         assert!(summary.day.weight.is_none());
         assert!(summary.bp_morning.is_none());
+        assert!(summary.bp_evening.is_none());
+    }
+
+    /// vitalog#20: rendering with both morning and evening readings
+    /// populated produces exactly one row per slot — no duplicate from
+    /// any custom-metric pass-through.
+    #[test]
+    fn render_text_bp_both_slots_populated_render_once_each() {
+        let mut s = fixture_summary();
+        s.bp_morning = Some(BpReading {
+            sys: 138,
+            dia: 88,
+            pulse: 70,
+        });
+        s.bp_evening = Some(BpReading {
+            sys: 132,
+            dia: 82,
+            pulse: 65,
+        });
+        let g = fixture_goals();
+        let out = render_text(&s, &g, false);
+        let morning_rows = out.lines().filter(|l| l.starts_with("BP morning:")).count();
+        let evening_rows = out.lines().filter(|l| l.starts_with("BP evening:")).count();
+        assert_eq!(morning_rows, 1, "got:\n{out}");
+        assert_eq!(evening_rows, 1, "got:\n{out}");
+        assert!(out.contains("138/88 (pulse 70)"), "got:\n{out}");
+        assert!(out.contains("132/82 (pulse 65)"), "got:\n{out}");
     }
 
     /// Regression: `vitalog log metric ...` writes to YAML only, so a
